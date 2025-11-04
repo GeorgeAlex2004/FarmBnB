@@ -59,39 +59,78 @@ const Login = () => {
     }
   };
 
-  // Initialize reCAPTCHA on mount for register flow
+  // Cleanup reCAPTCHA on unmount or mode switch
   useEffect(() => {
-    if (!isLogin) {
-      const auth = getAuth();
-      if (!recaptchaRef.current) return;
-      if ((window as any).reCaptchaVerifier) return; // reuse if exists
-      try {
-        (window as any).reCaptchaVerifier = new RecaptchaVerifier(auth, recaptchaRef.current, {
-          size: "invisible",
-        });
-      } catch (_) {
-        // ignore init errors; will retry on send
+    return () => {
+      // Clean up reCAPTCHA verifier when component unmounts or switches modes
+      if ((window as any).reCaptchaVerifier) {
+        try {
+          ((window as any).reCaptchaVerifier as RecaptchaVerifier).clear();
+        } catch (_) {
+          // ignore cleanup errors
+        }
+        delete (window as any).reCaptchaVerifier;
       }
-    }
+    };
   }, [isLogin]);
 
   const sendOtp = async () => {
     try {
       if (!phone) return toast.error("Enter phone number");
+      
+      // Format phone number to E.164 format (+91XXXXXXXXXX)
+      let formattedPhone = phone.trim();
+      if (!formattedPhone.startsWith('+')) {
+        // Remove all non-digits
+        const digits = formattedPhone.replace(/[^0-9]/g, '');
+        // Add +91 for India if not present
+        formattedPhone = `+91${digits}`;
+      }
+      
       setOtpPhase("sending");
       const auth = getAuth();
-      // Ensure verifier exists
-      let verifier = (window as any).reCaptchaVerifier as RecaptchaVerifier | undefined;
-      if (!verifier) {
-        verifier = new RecaptchaVerifier(auth, recaptchaRef.current as HTMLDivElement, { size: "invisible" });
-        (window as any).reCaptchaVerifier = verifier;
+      
+      // Clean up existing verifier if it exists
+      if ((window as any).reCaptchaVerifier) {
+        try {
+          ((window as any).reCaptchaVerifier as RecaptchaVerifier).clear();
+        } catch (_) {
+          // ignore cleanup errors
+        }
+        delete (window as any).reCaptchaVerifier;
       }
-      const result = await signInWithPhoneNumber(auth, phone, verifier);
+      
+      // Create new verifier
+      if (!recaptchaRef.current) {
+        throw new Error("reCAPTCHA container not ready");
+      }
+      
+      const verifier = new RecaptchaVerifier(auth, recaptchaRef.current, {
+        size: "invisible",
+        callback: () => {
+          // reCAPTCHA solved
+        },
+        'expired-callback': () => {
+          // reCAPTCHA expired
+          toast.error("reCAPTCHA expired. Please try again.");
+        }
+      });
+      
+      (window as any).reCaptchaVerifier = verifier;
+      
+      const result = await signInWithPhoneNumber(auth, formattedPhone, verifier);
       confirmationResultRef.current = result;
       setOtpPhase("codeSent");
       toast.success("OTP sent to your phone");
     } catch (err: any) {
       setOtpPhase("idle");
+      // Clean up verifier on error
+      if ((window as any).reCaptchaVerifier) {
+        try {
+          ((window as any).reCaptchaVerifier as RecaptchaVerifier).clear();
+        } catch (_) {}
+        delete (window as any).reCaptchaVerifier;
+      }
       toast.error(err?.message || "Failed to send OTP");
     }
   };

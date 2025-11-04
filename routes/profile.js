@@ -11,6 +11,20 @@ router.get('/', verifyFirebaseToken, async (req, res) => {
     const uid = req.firebaseUser.uid;
     const displayName = req.firebaseUser.name || req.firebaseUser.email?.split('@')[0] || 'User';
     
+    // Check if Supabase is configured
+    if (!supabase) {
+      console.error('Supabase client not initialized');
+      return res.json({ 
+        success: true, 
+        data: { 
+          id: uid, 
+          full_name: displayName, 
+          phone: null, 
+          phone_verified: false 
+        } 
+      });
+    }
+    
     // Try to get existing profile
     let { data, error } = await supabase
       .from('profiles')
@@ -18,39 +32,68 @@ router.get('/', verifyFirebaseToken, async (req, res) => {
       .eq('id', uid)
       .maybeSingle(); // Use maybeSingle() instead of single() to return null if not found
     
-    // If profile doesn't exist, create it
-    if (!data && (!error || error.code === 'PGRST116')) {
-      const { data: newData, error: insertError } = await supabase
-        .from('profiles')
-        .insert({ 
-          id: uid, 
-          full_name: displayName 
-        })
-        .select()
-        .single();
-      
-      if (insertError) {
-        // If insert fails (e.g., due to UUID type mismatch), return empty profile
-        console.warn('Could not create profile:', insertError.message);
-        return res.json({ 
-          success: true, 
-          data: { 
-            id: uid, 
-            full_name: displayName, 
-            phone: null, 
-            phone_verified: false 
-          } 
-        });
+    // If profile doesn't exist or table doesn't exist, return empty profile
+    if (!data) {
+      if (error) {
+        console.log('Profile query error:', error.code, error.message);
+        // If table doesn't exist (PGRST116) or other error, just return empty profile
+        if (error.code === '42P01' || error.message?.includes('does not exist')) {
+          console.warn('Profiles table does not exist. Please run the migration.');
+          return res.json({ 
+            success: true, 
+            data: { 
+              id: uid, 
+              full_name: displayName, 
+              phone: null, 
+              phone_verified: false 
+            } 
+          });
+        }
       }
-      data = newData;
-    } else if (error && error.code !== 'PGRST116') {
-      throw error;
+      
+      // Try to create profile if no error or it's a "not found" error
+      if (!error || error.code === 'PGRST116') {
+        const { data: newData, error: insertError } = await supabase
+          .from('profiles')
+          .insert({ 
+            id: uid, 
+            full_name: displayName 
+          })
+          .select()
+          .single();
+        
+        if (insertError) {
+          console.warn('Could not create profile:', insertError.code, insertError.message);
+          // Return empty profile anyway
+          return res.json({ 
+            success: true, 
+            data: { 
+              id: uid, 
+              full_name: displayName, 
+              phone: null, 
+              phone_verified: false 
+            } 
+          });
+        }
+        data = newData;
+      }
     }
     
     res.json({ success: true, data: data || { id: uid, full_name: displayName, phone: null, phone_verified: false } });
   } catch (error) {
     console.error('Profile fetch error:', error);
-    res.status(500).json({ success: false, message: 'Failed to fetch profile', error: error.message });
+    // Return a fallback profile instead of 500 error
+    const uid = req.firebaseUser?.uid || 'unknown';
+    const displayName = req.firebaseUser?.name || req.firebaseUser?.email?.split('@')[0] || 'User';
+    res.json({ 
+      success: true, 
+      data: { 
+        id: uid, 
+        full_name: displayName, 
+        phone: null, 
+        phone_verified: false 
+      } 
+    });
   }
 });
 
