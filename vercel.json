@@ -1,7 +1,14 @@
 {
   "version": 2,
-  "buildCommand": "cd frontend && VITE_BASE_PATH=/frontend/ npm install && npm run build",
-  "outputDirectory": "frontend/dist",
+  "builds": [
+    {
+      "src": "frontend/package.json",
+      "use": "@vercel/static-build",
+      "config": {
+        "distDir": "dist"
+      }
+    }
+  ],
   "rewrites": [
     {
       "source": "/(.*)",
