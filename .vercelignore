@@ -1,19 +1,32 @@
-# Exclude backend and local artifacts from Vercel static build
-node_modules
-backend
-routes
+# Backend files - not needed for frontend deployment
+routes/
 server.js
+middleware/
+models/
+scripts/
+utils/
+uploads/
+api/
 *.log
 .env
 .env.*
+.env.local
+
+# Node modules (will be installed fresh)
+node_modules/
+**/node_modules/
+
+# Build artifacts
+**/dist/
+**/.cache/
+**/.vite/
+**/.turbo/
+
+# Development files
 .DS_Store
-**/node_modules
-**/.turbo
-**/.cache
-**/dist
+*.log
+*.md
+!frontend/README.md
 
-# Keep frontend build cache minimal
-frontend/node_modules
-frontend/.vite
-frontend/.cache
-
+# Keep frontend source
+!frontend/
