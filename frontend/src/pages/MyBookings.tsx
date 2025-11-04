@@ -137,9 +137,22 @@ const MyBookings = () => {
                             <div>Total: <span className="font-semibold">{formatINR(Number(b.total_amount ?? 0))}</span></div>
                             <div className="text-xs text-muted-foreground">Advance to pay: {formatINR(calculateAdvance(Number(b.total_amount ?? 0)))}</div>
                           </div>
-                          <Link to={`/payments/${b.id || b._id}`}>
-                            <Button size="sm">Pay Now</Button>
-                          </Link>
+                          <div className="flex gap-2">
+                            <Link to={`/payments/${b.id || b._id}`}>
+                              <Button size="sm">Pay Now</Button>
+                            </Link>
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              onClick={() => {
+                                if (confirm("Are you sure you want to cancel this booking?")) {
+                                  api.cancelBooking(b.id || b._id).then(() => location.reload());
+                                }
+                              }}
+                            >
+                              Cancel
+                            </Button>
+                          </div>
                         </div>
                       </CardContent>
                     </Card>
