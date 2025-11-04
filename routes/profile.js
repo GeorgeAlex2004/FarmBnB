@@ -9,14 +9,47 @@ const router = express.Router();
 router.get('/', verifyFirebaseToken, async (req, res) => {
   try {
     const uid = req.firebaseUser.uid;
-    const { data, error } = await supabase
+    const displayName = req.firebaseUser.name || req.firebaseUser.email?.split('@')[0] || 'User';
+    
+    // Try to get existing profile
+    let { data, error } = await supabase
       .from('profiles')
       .select('*')
       .eq('id', uid)
-      .single();
-    if (error) throw error;
-    res.json({ success: true, data });
+      .maybeSingle(); // Use maybeSingle() instead of single() to return null if not found
+    
+    // If profile doesn't exist, create it
+    if (!data && (!error || error.code === 'PGRST116')) {
+      const { data: newData, error: insertError } = await supabase
+        .from('profiles')
+        .insert({ 
+          id: uid, 
+          full_name: displayName 
+        })
+        .select()
+        .single();
+      
+      if (insertError) {
+        // If insert fails (e.g., due to UUID type mismatch), return empty profile
+        console.warn('Could not create profile:', insertError.message);
+        return res.json({ 
+          success: true, 
+          data: { 
+            id: uid, 
+            full_name: displayName, 
+            phone: null, 
+            phone_verified: false 
+          } 
+        });
+      }
+      data = newData;
+    } else if (error && error.code !== 'PGRST116') {
+      throw error;
+    }
+    
+    res.json({ success: true, data: data || { id: uid, full_name: displayName, phone: null, phone_verified: false } });
   } catch (error) {
+    console.error('Profile fetch error:', error);
     res.status(500).json({ success: false, message: 'Failed to fetch profile', error: error.message });
   }
 });
@@ -34,6 +67,30 @@ router.put('/', verifyFirebaseToken, [
     }
 
     const uid = req.firebaseUser.uid;
+    const displayName = req.firebaseUser.name || req.firebaseUser.email?.split('@')[0] || 'User';
+    
+    // Check if profile exists
+    let { data: existingProfile } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('id', uid)
+      .maybeSingle();
+
+    // If profile doesn't exist, create it first
+    if (!existingProfile) {
+      const { error: insertError } = await supabase
+        .from('profiles')
+        .insert({ 
+          id: uid, 
+          full_name: displayName 
+        });
+      
+      if (insertError) {
+        console.warn('Could not create profile:', insertError.message);
+        // Continue anyway - we'll try to update which might fail
+      }
+    }
+
     const update = {};
     if (req.body.full_name !== undefined) update.full_name = req.body.full_name;
     if (req.body.phone !== undefined) update.phone = req.body.phone;
@@ -44,10 +101,15 @@ router.put('/', verifyFirebaseToken, [
       .update(update)
       .eq('id', uid)
       .select('*')
-      .single();
-    if (error) throw error;
-    res.json({ success: true, data });
+      .maybeSingle();
+    
+    if (error && error.code !== 'PGRST116') {
+      throw error;
+    }
+    
+    res.json({ success: true, data: data || { id: uid, ...update } });
   } catch (error) {
+    console.error('Profile update error:', error);
     res.status(500).json({ success: false, message: 'Failed to update profile', error: error.message });
   }
 });
