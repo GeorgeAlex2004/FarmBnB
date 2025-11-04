@@ -168,6 +168,7 @@ class ApiClient {
     maxPrice?: number;
     facilities?: string[];
     search?: string;
+    status?: 'active' | 'inactive' | 'all';
     page?: number;
     limit?: number;
   }) {

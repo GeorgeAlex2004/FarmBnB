@@ -67,8 +67,13 @@ router.get('/', async (req, res) => {
       .order('created_at', { ascending: false })
       .range(from, to);
 
-    if (!status) q = q.eq('is_active', true);
-    if (status === 'inactive') q = q.eq('is_active', false);
+    // Filter by status: 'all' shows everything, 'inactive' shows only inactive, default shows only active
+    if (!status || status === 'active') {
+      q = q.eq('is_active', true);
+    } else if (status === 'inactive') {
+      q = q.eq('is_active', false);
+    }
+    // If status === 'all', don't filter by is_active (show all)
     if (city) q = q.ilike('city', `%${city}%`);
     if (state) q = q.ilike('state', `%${state}%`);
     if (maxGuests) q = q.gte('max_guests', parseInt(maxGuests));

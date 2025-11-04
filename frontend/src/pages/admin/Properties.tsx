@@ -13,7 +13,8 @@ const AdminProperties = () => {
   const { data: propertiesResponse, isLoading } = useQuery({
     queryKey: ["admin-properties"],
     queryFn: async () => {
-      const response = await api.getProperties({});
+      // Admin should see all properties (active and inactive)
+      const response = await api.getProperties({ status: 'all' });
       return response;
     },
   });
