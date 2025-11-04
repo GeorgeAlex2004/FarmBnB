@@ -1,0 +1,19 @@
+# Exclude backend and local artifacts from Vercel static build
+node_modules
+backend
+routes
+server.js
+*.log
+.env
+.env.*
+.DS_Store
+**/node_modules
+**/.turbo
+**/.cache
+**/dist
+
+# Keep frontend build cache minimal
+frontend/node_modules
+frontend/.vite
+frontend/.cache
+
