@@ -286,7 +286,7 @@ router.post('/', verifyFirebaseToken, [
     const guestCharges = perHead * numberOfGuests * nights;
     const foodCharge = (req.body.foodRequired ? (numberOfGuests * 500 * nights) : 0);
     const totalAmount = subtotal + guestCharges + foodCharge + Number(property.cleaning_fee || 0) + Number(property.service_fee || 0);
-    const advanceAmount = Number((totalAmount * 0.5).toFixed(2));
+    // Note: advance_paid should be 0 initially - only updated when payment is actually made
 
     // Create booking
     const { data: booking, error } = await supabase
@@ -301,7 +301,7 @@ router.post('/', verifyFirebaseToken, [
         guest_charges: guestCharges,
         extra_fees: Number(property.cleaning_fee || 0) + Number(property.service_fee || 0) + foodCharge,
         total_amount: totalAmount,
-        advance_paid: advanceAmount,
+        advance_paid: 0, // No payment made yet - will be updated when user submits payment
         status: 'pending',
         food_required: !!foodRequired,
         food_preference: foodPreference || null,
