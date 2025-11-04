@@ -7,12 +7,24 @@ const getAuthToken = async (): Promise<string | null> => {
     const auth = getAuth();
     const user = auth.currentUser;
     if (user) {
-      return await user.getIdToken();
+      const token = await user.getIdToken();
+      if (!token) {
+        console.warn('Firebase user exists but getIdToken returned null');
+      }
+      return token;
+    } else {
+      console.warn('No Firebase user logged in');
     }
-  } catch (_) {
+  } catch (error) {
+    console.error('Error getting Firebase token:', error);
     // ignore if firebase/auth not initialized
   }
-  return localStorage.getItem('token');
+  // Fallback to legacy token (for backwards compatibility)
+  const legacyToken = localStorage.getItem('token');
+  if (legacyToken) {
+    console.warn('Using legacy token from localStorage');
+  }
+  return legacyToken;
 };
 
 // Helper function to handle API responses
@@ -46,12 +58,38 @@ class ApiClient {
 
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
+    } else {
+      console.warn('No auth token available for request to', endpoint);
     }
 
     const response = await fetch(`${this.baseURL}${endpoint}`, {
       ...options,
       headers,
     });
+
+    // If we get a 401, it might be because the token is expired or invalid
+    if (response.status === 401) {
+      console.error('Unauthorized request to', endpoint, '- Token may be expired or invalid');
+      // Try to refresh the token if possible
+      try {
+        const { getAuth } = await import('firebase/auth');
+        const auth = getAuth();
+        const user = auth.currentUser;
+        if (user) {
+          // Force token refresh
+          const newToken = await user.getIdToken(true);
+          headers['Authorization'] = `Bearer ${newToken}`;
+          // Retry the request once
+          const retryResponse = await fetch(`${this.baseURL}${endpoint}`, {
+            ...options,
+            headers,
+          });
+          return handleResponse(retryResponse);
+        }
+      } catch (refreshError) {
+        console.error('Failed to refresh token:', refreshError);
+      }
+    }
 
     return handleResponse(response);
   }

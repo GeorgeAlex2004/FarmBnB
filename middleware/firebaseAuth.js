@@ -27,14 +27,22 @@ exports.verifyFirebaseToken = async (req, res, next) => {
     const token = parts.length === 2 && parts[0] === 'Bearer' ? parts[1] : null;
 
     if (!token) {
+      console.log('Missing token - Authorization header:', authHeader ? 'present' : 'missing');
       return res.status(401).json({ success: false, message: 'Missing bearer token' });
+    }
+
+    // Check if Firebase Admin is initialized
+    if (!admin.apps.length) {
+      console.error('Firebase Admin not initialized');
+      return res.status(500).json({ success: false, message: 'Firebase Admin not configured' });
     }
 
     const decoded = await admin.auth().verifyIdToken(token);
     req.firebaseUser = decoded; // contains uid, email, and custom claims
     return next();
   } catch (err) {
-    return res.status(401).json({ success: false, message: 'Invalid Firebase token' });
+    console.error('Token verification error:', err.message);
+    return res.status(401).json({ success: false, message: 'Invalid Firebase token', error: err.message });
   }
 };
 
