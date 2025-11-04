@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import api from "@/lib/api";
-import { getAuth, updateProfile, RecaptchaVerifier, linkWithPhoneNumber, ConfirmationResult } from "firebase/auth";
+import { getAuth, updateProfile } from "firebase/auth";
 
 const Profile = () => {
   const { user, loading } = useAuth();
@@ -15,9 +15,6 @@ const Profile = () => {
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
   const [saving, setSaving] = useState(false);
-  const [verifying, setVerifying] = useState(false);
-  const [otpSent, setOtpSent] = useState<ConfirmationResult | null>(null);
-  const [otpCode, setOtpCode] = useState("");
 
   // Redirect to login if not authenticated
   useEffect(() => {
@@ -67,47 +64,6 @@ const Profile = () => {
     }
   };
 
-  const sendOtp = async () => {
-    try {
-      setVerifying(true);
-      const auth = getAuth();
-      if (!auth.currentUser) throw new Error('Not logged in');
-      if (!phone) throw new Error('Enter phone number');
-      // Ensure phone is in E.164 (+91...) format for India
-      const e164 = phone.startsWith('+') ? phone : `+91${phone.replace(/[^0-9]/g, '')}`;
-      // Setup invisible reCAPTCHA
-      const verifier = new RecaptchaVerifier(auth, 'recaptcha-container', { size: 'invisible' });
-      const confirmation = await linkWithPhoneNumber(auth.currentUser, e164, verifier);
-      setOtpSent(confirmation);
-      toast.success('OTP sent');
-    } catch (e: any) {
-      // Handle billing error
-      if (e.code === 'auth/billing-not-enabled' || e.message?.includes('billing')) {
-        toast.error('Phone verification requires Firebase billing. For now, you can save your phone number and it will be verified manually by admin.');
-        // Allow saving phone number without verification
-        await api.updateProfileSupabase({ phone });
-        toast.info('Phone number saved. Admin will verify it manually.');
-      } else {
-        toast.error(e?.message || 'Failed to send OTP');
-      }
-    } finally {
-      setVerifying(false);
-    }
-  };
-
-  const confirmOtp = async () => {
-    try {
-      if (!otpSent) return;
-      await otpSent.confirm(otpCode);
-      // Update phone_verified flag in backend
-      await api.updateProfileSupabase({ phone_verified: true });
-      toast.success('Phone verified');
-      setOtpSent(null);
-      setOtpCode('');
-    } catch (e: any) {
-      toast.error(e?.message || 'Invalid code');
-    }
-  };
 
   // Show loading state while checking authentication
   if (loading) {
@@ -143,16 +99,7 @@ const Profile = () => {
             </div>
             <div>
               <label className="text-sm font-medium mb-1 block">Phone</label>
-              <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Your phone" />
-            </div>
-            <div className="flex items-center gap-2">
-              <Button type="button" variant="outline" onClick={sendOtp} disabled={verifying || !phone}>Verify Phone</Button>
-              {otpSent && (
-                <div className="flex items-center gap-2">
-                  <Input value={otpCode} onChange={(e) => setOtpCode(e.target.value)} placeholder="Enter OTP" className="w-32" />
-                  <Button type="button" onClick={confirmOtp}>Confirm</Button>
-                </div>
-              )}
+              <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Your phone number" />
             </div>
             <div className="pt-2">
               <Button onClick={handleSave} disabled={saving}>
@@ -161,7 +108,6 @@ const Profile = () => {
             </div>
           </CardContent>
         </Card>
-        <div id="recaptcha-container" />
       </div>
     </div>
   );

@@ -1,5 +1,4 @@
-import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -7,20 +6,15 @@ import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { Home, Mail, Lock, User } from "lucide-react";
 import { Link } from "react-router-dom";
-import { getAuth, sendPasswordResetEmail, RecaptchaVerifier, signInWithPhoneNumber, ConfirmationResult } from "firebase/auth";
+import { getAuth, sendPasswordResetEmail } from "firebase/auth";
 
 const Login = () => {
-  const navigate = useNavigate();
   const { login, register } = useAuth();
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
-  const [otp, setOtp] = useState("");
-  const [otpPhase, setOtpPhase] = useState<"idle" | "sending" | "codeSent" | "verifying" | "verified">("idle");
-  const confirmationResultRef = useRef<ConfirmationResult | null>(null);
-  const recaptchaRef = useRef<HTMLDivElement | null>(null);
   const [loading, setLoading] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
   const [resetEmail, setResetEmail] = useState("");
@@ -33,9 +27,6 @@ const Login = () => {
       if (isLogin) {
         await login(email, password);
       } else {
-        // Phone verification is optional (Firebase billing required for OTP)
-        // If user tried to verify but billing not enabled, allow registration anyway
-        // If user didn't try to verify, also allow (phone verification is optional)
         await register(name, phone, email, password);
       }
     } catch (error: any) {
@@ -57,104 +48,6 @@ const Login = () => {
     }
   };
 
-  // Cleanup reCAPTCHA on unmount or mode switch
-  useEffect(() => {
-    return () => {
-      // Clean up reCAPTCHA verifier when component unmounts or switches modes
-      if ((window as any).reCaptchaVerifier) {
-        try {
-          ((window as any).reCaptchaVerifier as RecaptchaVerifier).clear();
-        } catch (_) {
-          // ignore cleanup errors
-        }
-        delete (window as any).reCaptchaVerifier;
-      }
-    };
-  }, [isLogin]);
-
-  const sendOtp = async () => {
-    try {
-      if (!phone) return toast.error("Enter phone number");
-      
-      // Format phone number to E.164 format (+91XXXXXXXXXX)
-      let formattedPhone = phone.trim();
-      if (!formattedPhone.startsWith('+')) {
-        // Remove all non-digits
-        const digits = formattedPhone.replace(/[^0-9]/g, '');
-        // Add +91 for India if not present
-        formattedPhone = `+91${digits}`;
-      }
-      
-      setOtpPhase("sending");
-      const auth = getAuth();
-      
-      // Clean up existing verifier if it exists
-      if ((window as any).reCaptchaVerifier) {
-        try {
-          ((window as any).reCaptchaVerifier as RecaptchaVerifier).clear();
-        } catch (_) {
-          // ignore cleanup errors
-        }
-        delete (window as any).reCaptchaVerifier;
-      }
-      
-      // Create new verifier
-      if (!recaptchaRef.current) {
-        throw new Error("reCAPTCHA container not ready");
-      }
-      
-      const verifier = new RecaptchaVerifier(auth, recaptchaRef.current, {
-        size: "invisible",
-        callback: () => {
-          // reCAPTCHA solved
-        },
-        'expired-callback': () => {
-          // reCAPTCHA expired
-          toast.error("reCAPTCHA expired. Please try again.");
-        }
-      });
-      
-      (window as any).reCaptchaVerifier = verifier;
-      
-      const result = await signInWithPhoneNumber(auth, formattedPhone, verifier);
-      confirmationResultRef.current = result;
-      setOtpPhase("codeSent");
-      toast.success("OTP sent to your phone");
-    } catch (err: any) {
-      setOtpPhase("idle");
-      // Clean up verifier on error
-      if ((window as any).reCaptchaVerifier) {
-        try {
-          ((window as any).reCaptchaVerifier as RecaptchaVerifier).clear();
-        } catch (_) {}
-        delete (window as any).reCaptchaVerifier;
-      }
-      
-      // Handle billing error - make phone verification optional
-      if (err.code === 'auth/billing-not-enabled' || err.message?.includes('billing')) {
-        toast.error('Phone verification requires Firebase billing. Phone verification is optional - you can continue without it.');
-        // Allow registration to proceed without phone verification
-        setOtpPhase("verified"); // Mark as verified to allow registration
-      } else {
-        toast.error(err?.message || "Failed to send OTP");
-      }
-    }
-  };
-
-  const verifyOtp = async () => {
-    try {
-      if (!otp) return toast.error("Enter the OTP");
-      setOtpPhase("verifying");
-      const cr = confirmationResultRef.current;
-      if (!cr) throw new Error("No OTP session. Please resend OTP.");
-      await cr.confirm(otp);
-      setOtpPhase("verified");
-      toast.success("Phone verified");
-    } catch (err: any) {
-      setOtpPhase("codeSent");
-      toast.error(err?.message || "Invalid OTP");
-    }
-  };
 
   return (
     <div className="min-h-screen bg-gradient-hero flex items-center justify-center p-4">
@@ -213,27 +106,13 @@ const Login = () => {
                 <label className="text-sm font-medium mb-1 block">
                   Phone *
                 </label>
-                <div className="flex gap-2">
-                  <Input
-                    type="tel"
-                    placeholder="e.g., +91XXXXXXXXXX"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    required
-                  />
-                  <Button type="button" variant="outline" onClick={sendOtp} disabled={otpPhase === 'sending' || otpPhase === 'verified'}>
-                    {otpPhase === 'sending' ? 'Sending...' : (otpPhase === 'codeSent' ? 'Resend OTP' : 'Send OTP')}
-                  </Button>
-                </div>
-                {otpPhase === 'codeSent' || otpPhase === 'verifying' ? (
-                  <div className="mt-2 flex gap-2">
-                    <Input type="text" placeholder="Enter OTP" value={otp} onChange={(e) => setOtp(e.target.value)} />
-                    <Button type="button" onClick={verifyOtp} disabled={otpPhase === 'verifying'}>
-                      {otpPhase === 'verifying' ? 'Verifying...' : 'Verify'}
-                    </Button>
-                  </div>
-                ) : null}
-                <div ref={recaptchaRef} />
+                <Input
+                  type="tel"
+                  placeholder="e.g., +91XXXXXXXXXX or 9876543210"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  required
+                />
               </div>
             )}
 
@@ -255,7 +134,7 @@ const Login = () => {
               </div>
             </div>
 
-            <Button type="submit" className="w-full" disabled={loading || (!isLogin && otpPhase !== 'verified')} size="lg">
+            <Button type="submit" className="w-full" disabled={loading} size="lg">
               {loading
                 ? "Please wait..."
                 : isLogin
