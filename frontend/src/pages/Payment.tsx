@@ -34,7 +34,7 @@ const PaymentPage = () => {
     if (!bookingId) return;
     try {
       await api.confirmPayment(bookingId, "manual", undefined /* optional: paymentIntentId not used */, { referenceId, amount });
-      toast.success("Payment recorded. We'll verify and update your booking.");
+      toast.success("Payment details submitted. Admin will verify the transaction and confirm your booking.");
       navigate("/bookings");
     } catch (e: any) {
       toast.error(e?.message || "Failed to record payment");

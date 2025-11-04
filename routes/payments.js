@@ -102,18 +102,16 @@ router.post('/confirm', verifyFirebaseToken, [
     }
 
     // Manual flow: accept optional amount and reference; admins can override
+    // DO NOT auto-confirm - admin must verify payment and confirm manually
     const amountPaid = Number(req.body.amount || 0);
     const referenceId = (req.body.referenceId || '').toString();
     const newAdvance = Number(booking.advance_paid || 0) + amountPaid;
-    const total = Number(booking.total_amount || 0);
     const updates = {
       advance_paid: newAdvance,
       payment_method: 'manual',
     };
-    if (referenceId) updates.manual_reference = referenceId; // tolerant extra field (ignored by DB if not present)
-    if (booking.status === 'pending' && newAdvance >= Math.round(total * 0.5 * 100) / 100) {
-      updates.status = 'confirmed';
-    }
+    if (referenceId) updates.manual_reference = referenceId; // Store transaction ID for admin verification
+    // Status remains 'pending' until admin verifies and confirms
 
     const { data: updated, error: updErr } = await supabase
       .from('bookings')
@@ -123,7 +121,7 @@ router.post('/confirm', verifyFirebaseToken, [
       .single();
     if (updErr) throw updErr;
 
-    return res.json({ success: true, message: 'Payment recorded successfully', data: updated });
+    return res.json({ success: true, message: 'Payment details submitted. Admin will verify and confirm your booking.', data: updated });
   } catch (err) {
     console.error('Confirm payment error:', err);
     return res.status(500).json({ success: false, message: 'Server error', error: err.message });

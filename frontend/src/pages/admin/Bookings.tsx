@@ -372,21 +372,28 @@ const AdminBookings = (): JSX.Element => {
                   <TableRow>
                     <TableHead>Booking #</TableHead>
                     <TableHead>Customer</TableHead>
+                    <TableHead>Property</TableHead>
                     <TableHead>Date</TableHead>
                     <TableHead>Total</TableHead>
-                    <TableHead>Advance</TableHead>
+                    <TableHead>Advance Paid</TableHead>
+                    <TableHead>Transaction ID</TableHead>
                     <TableHead>Action</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {(bookings || [])
                     .filter((b: any) => (b.verification_status || '') === 'approved' && (b.status || '') === 'pending')
-                    .map((b: any) => (
+                    .map((b: any) => {
+                      const customerName = b.customer_name || (typeof b.customer === 'object' ? (b.customer?.name || 'Guest') : 'Guest');
+                      const propertyName = b.property_name || 'Unknown';
+                      const transactionId = b.manual_reference || '-';
+                      return (
                       <>
                       <TableRow key={(b.id || b._id) + '-row'}>
                         <TableCell className="font-mono text-sm">{b.id || b._id}</TableCell>
-                        <TableCell>{typeof b.customer === 'object' ? (b.customer?.name || 'Guest') : 'Guest'}</TableCell>
-                        <TableCell>{(b.check_in_date || '').toString()}</TableCell>
+                        <TableCell className="font-medium">{customerName}</TableCell>
+                        <TableCell>{propertyName}</TableCell>
+                        <TableCell>{formatDate(b.check_in_date)}</TableCell>
                         <TableCell>
                           {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(Number(b.total_amount ?? 0))}
                         </TableCell>
@@ -394,31 +401,57 @@ const AdminBookings = (): JSX.Element => {
                           {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(Number(b.advance_paid ?? 0))}
                         </TableCell>
                         <TableCell>
+                          <span className={transactionId === '-' ? 'text-muted-foreground italic' : 'font-mono text-sm font-semibold text-green-700'}>
+                            {transactionId}
+                          </span>
+                        </TableCell>
+                        <TableCell>
                           <div className="flex gap-2">
-                            <Button size="sm" variant="secondary" onClick={() => setOpenPendingDetail(openPendingDetail === (b.id || b._id) ? null : (b.id || b._id))}>Details</Button>
+                            <Button 
+                              size="sm" 
+                              variant="secondary" 
+                              onClick={() => setOpenPendingDetail(openPendingDetail === (b.id || b._id) ? null : (b.id || b._id))}
+                            >
+                              {openPendingDetail === (b.id || b._id) ? 'Hide' : 'View'} Details
+                            </Button>
                           </div>
                         </TableCell>
                       </TableRow>
                       {openPendingDetail === (b.id || b._id) && (
                         <TableRow key={(b.id || b._id) + '-detail'}>
-                          <TableCell colSpan={6}>
-                            <div className="p-4 bg-muted/40 rounded-md space-y-2">
-                              <div className="text-sm">
-                                <div><span className="font-medium">Customer:</span> {typeof b.customer === 'object' ? (b.customer?.name || 'Guest') : 'Guest'}</div>
-                                <div><span className="font-medium">Dates:</span> {(b.check_in_date || '').toString()} → {(b.check_out_date || '').toString()}</div>
+                          <TableCell colSpan={8}>
+                            <div className="p-4 bg-muted/40 rounded-md space-y-3">
+                              <div className="grid grid-cols-2 gap-4 text-sm">
+                                <div><span className="font-medium">Customer:</span> {customerName}</div>
+                                <div><span className="font-medium">Property:</span> {propertyName}</div>
+                                <div><span className="font-medium">Check-in:</span> {formatDate(b.check_in_date)}</div>
+                                <div><span className="font-medium">Check-out:</span> {formatDate(b.check_out_date)}</div>
                                 <div><span className="font-medium">Guests:</span> {b.num_guests || 0}</div>
-                                <div><span className="font-medium">Reference ID:</span> {b.manual_reference || '-'}</div>
+                                <div><span className="font-medium">Total Amount:</span> {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(Number(b.total_amount ?? 0))}</div>
                                 <div><span className="font-medium">Advance Paid:</span> {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(Number(b.advance_paid ?? 0))}</div>
+                                <div className="col-span-2">
+                                  <span className="font-medium">Transaction ID:</span>{' '}
+                                  <span className={transactionId === '-' ? 'text-muted-foreground italic' : 'font-mono text-base font-semibold text-green-700 bg-green-50 px-2 py-1 rounded'}>
+                                    {transactionId}
+                                  </span>
+                                </div>
                               </div>
-                              <div className="flex gap-2">
-                                <Button size="sm" onClick={() => confirmMutation.mutate(b.id || b._id)} disabled={confirmMutation.isPending}>Verify Payment & Confirm</Button>
+                              <div className="flex gap-2 pt-2 border-t">
+                                <Button 
+                                  size="sm" 
+                                  onClick={() => confirmMutation.mutate(b.id || b._id)} 
+                                  disabled={confirmMutation.isPending}
+                                  className="bg-green-600 hover:bg-green-700"
+                                >
+                                  {confirmMutation.isPending ? 'Confirming...' : 'Verify Payment & Confirm Booking'}
+                                </Button>
                               </div>
                             </div>
                           </TableCell>
                         </TableRow>
                       )}
                       </>
-                    ))}
+                    )})}
                 </TableBody>
               </Table>
             </div>
