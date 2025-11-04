@@ -279,9 +279,10 @@ router.post('/', verifyFirebaseToken, [
     }
 
     // Calculate pricing
+    // For same-day bookings, nights is always 1 (full-day booking with fixed check-in/out times)
     const perHead = Number(property.per_head_charge || 0);
     const base = Number(property.base_price_per_night || 0);
-    const nights = Math.ceil((checkOutDate - checkInDate) / (1000 * 60 * 60 * 24));
+    const nights = 1; // Same-day bookings only - full day with fixed times
     const subtotal = base * nights;
     const guestCharges = perHead * numberOfGuests * nights;
     const foodCharge = (req.body.foodRequired ? (numberOfGuests * 500 * nights) : 0);

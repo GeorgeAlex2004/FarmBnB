@@ -10,6 +10,9 @@ import { format, parseISO, isValid } from "date-fns";
 
 const formatINR = (n: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(n);
 
+// Calculate advance amount (50% of total) with same rounding as backend
+const calculateAdvance = (total: number) => Math.round(total * 0.5 * 100) / 100;
+
 const MyBookings = () => {
   const { data, isLoading } = useQuery({
     queryKey: ["my-bookings"],
@@ -91,6 +94,7 @@ const MyBookings = () => {
                         <div className="pt-2 flex items-center justify-between">
                           <div className="text-sm">
                             <div>Total: <span className="font-semibold">{formatINR(Number(b.total_amount ?? 0))}</span></div>
+                            <div className="text-xs text-muted-foreground">Advance to pay: {formatINR(calculateAdvance(Number(b.total_amount ?? 0)))}</div>
                           </div>
                           <Link to={`/bookings/${b.id || b._id}/id-proof`}>
                             <Button variant="outline" size="sm">View</Button>
@@ -131,7 +135,7 @@ const MyBookings = () => {
                         <div className="pt-2 flex items-center justify-between">
                           <div className="text-sm">
                             <div>Total: <span className="font-semibold">{formatINR(Number(b.total_amount ?? 0))}</span></div>
-                            <div className="text-xs text-muted-foreground">Advance: {formatINR(Number(b.advance_paid ?? 0))}</div>
+                            <div className="text-xs text-muted-foreground">Advance to pay: {formatINR(calculateAdvance(Number(b.total_amount ?? 0)))}</div>
                           </div>
                           <Link to={`/payments/${b.id || b._id}`}>
                             <Button size="sm">Pay Now</Button>

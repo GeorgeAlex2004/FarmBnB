@@ -465,7 +465,7 @@ const PropertyDetails = () => {
                       <span>{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(total)}</span>
                     </div>
                     <div className="text-xs text-muted-foreground pt-1">
-                      Advance: {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(total * 0.5)} (50%)
+                      Advance: {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(Math.round(total * 0.5 * 100) / 100)} (50%)
                     </div>
                     <div className="text-xs text-destructive/80">
                       Note: Advance amount is non-refundable.
