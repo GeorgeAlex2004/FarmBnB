@@ -185,13 +185,14 @@ const PaymentPage = () => {
                 </div>
 
                 <div className="space-y-2">
-                  <label className="text-sm font-medium block">Payment Screenshot (Optional but recommended)</label>
+                  <label className="text-sm font-medium block">Payment Screenshot <span className="text-destructive">*</span></label>
                   <input
                     ref={screenshotRef}
                     type="file"
                     accept="image/*"
                     onChange={handleScreenshotChange}
                     className="hidden"
+                    required
                   />
                   <div className="flex gap-2">
                     <Button
@@ -221,9 +222,12 @@ const PaymentPage = () => {
                       <img src={screenshotPreview} alt="Payment screenshot preview" className="w-full max-h-48 object-contain rounded border" />
                     </div>
                   )}
+                  {!paymentScreenshot && (
+                    <p className="text-xs text-destructive">Payment screenshot is required</p>
+                  )}
                 </div>
 
-                <Button className="w-full" onClick={handleConfirm} disabled={!referenceId.trim()}>I've paid</Button>
+                <Button className="w-full" onClick={handleConfirm} disabled={!referenceId.trim() || !paymentScreenshot}>Proceed</Button>
               </div>
             )}
           </CardContent>
