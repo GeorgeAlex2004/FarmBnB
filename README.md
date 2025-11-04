@@ -4,15 +4,19 @@ This repository is configured for Vercel deployment of the frontend app located 
 
 ## Deploying to Vercel
 
-- Framework: Vite + React (TypeScript)
-- Build command: `npm run vercel-build`
-- Output directory: `frontend/dist`
-- Root: repository root (uses `vercel.json` to target `frontend/`)
+### Configuration Steps:
+1. **Import Repository** in Vercel Dashboard
+2. **Set Root Directory** to `frontend`
+3. **Framework Preset**: Vite (auto-detected)
+4. **Build Command**: Auto-detected (`npm run build`)
+5. **Output Directory**: Auto-detected (`dist`)
 
-### Environment variables (set in Vercel Project Settings)
+### Environment Variables (set in Vercel Project Settings):
 - `VITE_API_BASE_URL` → Your API base URL (e.g., `https://api.example.com`)
 - `VITE_UPI_ID` → UPI ID to display on the Payment page
 - `VITE_UPI_QR_CODE_URL` → Public URL to the QR code image
+
+**Important**: Set the **Root Directory** to `frontend` in Vercel project settings. The `frontend/vercel.json` file handles SPA routing.
 
 ## Local Development
 
