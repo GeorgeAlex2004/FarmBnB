@@ -362,7 +362,7 @@ const AdminBookings = (): JSX.Element => {
 
       <Card className="shadow-soft mb-6">
         <CardHeader>
-          <CardTitle>Pending Payment</CardTitle>
+          <CardTitle>Payment Verification</CardTitle>
         </CardHeader>
         <CardContent>
           {isLoading ? (
@@ -384,11 +384,17 @@ const AdminBookings = (): JSX.Element => {
                 </TableHeader>
                 <TableBody>
                   {(bookings || [])
-                    .filter((b: any) => (b.verification_status || '') === 'approved' && (b.status || '') === 'pending')
+                    .filter((b: any) => 
+                      (b.verification_status || '') === 'approved' && 
+                      (b.status || '') === 'pending' &&
+                      (b.manual_reference || '').trim() !== '' &&
+                      (b.payment_screenshot_url || '').trim() !== ''
+                    )
                     .map((b: any) => {
                       const customerName = b.customer_name || (typeof b.customer === 'object' ? (b.customer?.name || 'Guest') : 'Guest');
                       const propertyName = b.property_name || 'Unknown';
                       const transactionId = b.manual_reference || '-';
+                      const formatINR = (n: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(n);
                       return (
                       <>
                       <TableRow key={(b.id || b._id) + '-row'}>
@@ -397,13 +403,13 @@ const AdminBookings = (): JSX.Element => {
                         <TableCell>{propertyName}</TableCell>
                         <TableCell>{formatDate(b.check_in_date)}</TableCell>
                         <TableCell>
-                          {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(Number(b.total_amount ?? 0))}
+                          {formatINR(Number(b.total_amount ?? 0))}
                         </TableCell>
                         <TableCell>
-                          {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(Number(b.advance_paid ?? 0))}
+                          {formatINR(Number(b.advance_paid ?? 0))}
                         </TableCell>
                         <TableCell>
-                          <span className={transactionId === '-' ? 'text-muted-foreground italic' : 'font-mono text-sm font-semibold text-green-700'}>
+                          <span className="font-mono text-sm font-semibold text-green-700">
                             {transactionId}
                           </span>
                         </TableCell>
@@ -422,23 +428,137 @@ const AdminBookings = (): JSX.Element => {
                       {openPendingDetail === (b.id || b._id) && (
                         <TableRow key={(b.id || b._id) + '-detail'}>
                           <TableCell colSpan={8}>
-                            <div className="p-4 bg-muted/40 rounded-md space-y-3">
+                            <div className="p-6 bg-muted/40 rounded-md space-y-4">
+                              {/* Basic Booking Details */}
                               <div className="grid grid-cols-2 gap-4 text-sm">
                                 <div><span className="font-medium">Customer:</span> {customerName}</div>
                                 <div><span className="font-medium">Property:</span> {propertyName}</div>
                                 <div><span className="font-medium">Check-in:</span> {formatDate(b.check_in_date)}</div>
                                 <div><span className="font-medium">Check-out:</span> {formatDate(b.check_out_date)}</div>
                                 <div><span className="font-medium">Guests:</span> {b.num_guests || 0}</div>
-                                <div><span className="font-medium">Total Amount:</span> {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(Number(b.total_amount ?? 0))}</div>
-                                <div><span className="font-medium">Advance Paid:</span> {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(Number(b.advance_paid ?? 0))}</div>
-                                <div className="col-span-2">
-                                  <span className="font-medium">Transaction ID:</span>{' '}
-                                  <span className={transactionId === '-' ? 'text-muted-foreground italic' : 'font-mono text-base font-semibold text-green-700 bg-green-50 px-2 py-1 rounded'}>
-                                    {transactionId}
-                                  </span>
+                                <div><span className="font-medium">Food Required:</span> {b.food_required ? 'Yes' : 'No'}</div>
+                                {b.food_preference && (
+                                  <div><span className="font-medium">Food Preference:</span> {b.food_preference}</div>
+                                )}
+                                {b.allergies && (
+                                  <div><span className="font-medium">Allergies:</span> {b.allergies}</div>
+                                )}
+                              </div>
+
+                              {/* Cost Breakdown */}
+                              <div className="border-t pt-4">
+                                <h4 className="font-semibold mb-3">Cost Breakdown</h4>
+                                <div className="space-y-2 text-sm">
+                                  <div className="flex justify-between">
+                                    <span>Base amount (1 day):</span>
+                                    <span>{formatINR(Number(b.base_amount || 0))}</span>
+                                  </div>
+                                  {Number(b.guest_charges || 0) > 0 && (
+                                    <div className="flex justify-between">
+                                      <span>Guest charges ({b.num_guests || 0} guests):</span>
+                                      <span>{formatINR(Number(b.guest_charges || 0))}</span>
+                                    </div>
+                                  )}
+                                  {Number(b.extra_fees || 0) > 0 && (
+                                    <div className="flex justify-between">
+                                      <span>Extra fees (food, cleaning, service):</span>
+                                      <span>{formatINR(Number(b.extra_fees || 0))}</span>
+                                    </div>
+                                  )}
+                                  <div className="flex justify-between font-semibold text-base pt-2 border-t">
+                                    <span>Total Amount:</span>
+                                    <span>{formatINR(Number(b.total_amount || 0))}</span>
+                                  </div>
+                                  <div className="flex justify-between text-sm pt-1">
+                                    <span>Advance Paid (50%):</span>
+                                    <span className="font-semibold text-primary">{formatINR(Number(b.advance_paid || 0))}</span>
+                                  </div>
                                 </div>
                               </div>
-                              <div className="flex gap-2 pt-2 border-t">
+
+                              {/* Payment Details */}
+                              <div className="border-t pt-4">
+                                <h4 className="font-semibold mb-3">Payment Details</h4>
+                                <div className="space-y-2 text-sm">
+                                  <div>
+                                    <span className="font-medium">Transaction ID:</span>{' '}
+                                    <span className="font-mono text-base font-semibold text-green-700 bg-green-50 px-2 py-1 rounded">
+                                      {transactionId}
+                                    </span>
+                                  </div>
+                                  {b.payment_screenshot_url && (
+                                    <div>
+                                      <span className="font-medium mb-2 block">Payment Screenshot:</span>
+                                      <div className="border rounded-lg overflow-hidden max-w-md">
+                                        <img 
+                                          src={b.payment_screenshot_url} 
+                                          alt="Payment screenshot" 
+                                          className="w-full h-auto max-h-96 object-contain bg-muted"
+                                          onError={(e) => {
+                                            (e.target as HTMLImageElement).src = '/placeholder.svg';
+                                          }}
+                                        />
+                                        <div className="p-2 bg-muted border-t">
+                                          <Button 
+                                            size="sm" 
+                                            variant="outline"
+                                            onClick={() => window.open(b.payment_screenshot_url, '_blank')}
+                                          >
+                                            Open Full Size
+                                          </Button>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* ID Proofs */}
+                              {b.id_proofs && Array.isArray(b.id_proofs) && b.id_proofs.length > 0 && (
+                                <div className="border-t pt-4">
+                                  <h4 className="font-semibold mb-3">ID Proofs</h4>
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    {b.id_proofs.map((proofUrl: string, index: number) => (
+                                      <div key={index} className="border rounded-lg overflow-hidden">
+                                        {proofUrl.toLowerCase().endsWith('.pdf') ? (
+                                          <div className="p-4 bg-muted">
+                                            <div className="flex items-center justify-between">
+                                              <span className="text-sm font-medium">ID Proof {index + 1} (PDF)</span>
+                                              <Button size="sm" variant="outline" onClick={() => window.open(proofUrl, '_blank')}>
+                                                Open PDF
+                                              </Button>
+                                            </div>
+                                          </div>
+                                        ) : (
+                                          <div className="relative">
+                                            <img 
+                                              src={proofUrl} 
+                                              alt={`ID Proof ${index + 1}`}
+                                              className="w-full h-auto max-h-64 object-contain bg-muted"
+                                              onError={(e) => {
+                                                (e.target as HTMLImageElement).src = '/placeholder.svg';
+                                              }}
+                                            />
+                                            <div className="absolute top-2 right-2">
+                                              <Button 
+                                                size="sm" 
+                                                variant="secondary" 
+                                                onClick={() => window.open(proofUrl, '_blank')}
+                                                className="bg-black/50 text-white hover:bg-black/70"
+                                              >
+                                                Open Full Size
+                                              </Button>
+                                            </div>
+                                          </div>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Action Button */}
+                              <div className="flex gap-2 pt-4 border-t">
                                 <Button 
                                   size="sm" 
                                   onClick={() => confirmMutation.mutate(b.id || b._id)} 
