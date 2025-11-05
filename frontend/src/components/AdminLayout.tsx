@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, Outlet, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
-  Home,
+  LayoutDashboard,
   Building,
   Calendar,
   LogOut,
@@ -38,7 +38,7 @@ export const AdminLayout = () => {
   }
 
   const navItems = [
-    { icon: Home, label: "Dashboard", path: "/admin/dashboard" },
+    { icon: LayoutDashboard, label: "Dashboard", path: "/admin/dashboard" },
     { icon: Building, label: "Properties", path: "/admin/properties" },
     { icon: Calendar, label: "Bookings", path: "/admin/bookings" },
   ];
@@ -61,8 +61,12 @@ export const AdminLayout = () => {
       >
         <div className="flex flex-col h-full">
           <div className="p-6 border-b">
-            <Link to="/" className="flex items-center gap-2 group">
-              <Home className="h-6 w-6 text-primary transition-transform group-hover:scale-110" />
+            <Link to="/admin/dashboard" className="flex items-center gap-2 group">
+              <img
+                src="/logo.png"
+                alt="FarmBnB"
+                className="h-8 w-auto object-contain transition-transform group-hover:scale-105"
+              />
               <span className="text-xl font-bold bg-gradient-hero-text">
                 FarmBnB Admin
               </span>

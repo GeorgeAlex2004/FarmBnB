@@ -1,5 +1,5 @@
 // @ts-nocheck - Type errors are due to missing node_modules, install dependencies to resolve
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format, isValid, parseISO } from "date-fns";
 import { CheckCircle2, XCircle, Loader2 } from "lucide-react";
@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 interface Booking {
   _id?: string;
@@ -154,7 +155,77 @@ const AdminBookings = (): JSX.Element => {
   const [openPendingDetail, setOpenPendingDetail] = useState<string | null>(null);
   const [idProofDialogOpen, setIdProofDialogOpen] = useState(false);
   const [selectedBookingForIds, setSelectedBookingForIds] = useState<any>(null);
+  const [statusFilter, setStatusFilter] = useState<string>("all");
   const formatINR = (n: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(n);
+
+  // Function to determine booking status
+  const getBookingStatus = (booking: any): string => {
+    // If status is explicitly set to confirmed or cancelled, use it
+    if (booking.status === 'confirmed' || booking.status === 'cancelled') {
+      return booking.status;
+    }
+    
+    // If verification_status is pending, return approval_pending
+    if (booking.verification_status === 'pending') {
+      return 'approval_pending';
+    }
+    
+    // If ID proofs exist but verification_status is not approved, return approval_pending
+    if (booking.id_proofs && Array.isArray(booking.id_proofs) && booking.id_proofs.length > 0) {
+      if (booking.verification_status !== 'approved') {
+        return 'approval_pending';
+      }
+    }
+    
+    // If payment screenshot exists but status is not confirmed, return payment_verification_pending
+    if (booking.payment_screenshot_url && booking.verification_status === 'approved' && booking.status !== 'confirmed') {
+      return 'payment_verification_pending';
+    }
+    
+    // If verification is approved but advance is not paid, return payment_pending
+    if (booking.verification_status === 'approved' && (booking.advance_paid === 0 || !booking.advance_paid)) {
+      return 'payment_pending';
+    }
+    
+    // If status is explicitly set, use it
+    if (booking.status) {
+      return booking.status;
+    }
+    
+    // Default to pending
+    return 'pending';
+  };
+
+  // Filter bookings based on status filter
+  const filteredBookings = useMemo(() => {
+    if (statusFilter === "all") {
+      return bookings;
+    }
+    return bookings.filter((booking) => {
+      const bookingStatus = getBookingStatus(booking);
+      return bookingStatus === statusFilter;
+    });
+  }, [bookings, statusFilter]);
+
+  // Get title based on selected filter
+  const getTitle = (): string => {
+    switch (statusFilter) {
+      case "all":
+        return "All Bookings";
+      case "approval_pending":
+        return "Approval Pending Bookings";
+      case "payment_pending":
+        return "Payment Pending Bookings";
+      case "payment_verification_pending":
+        return "Payment Verification Bookings";
+      case "confirmed":
+        return "Confirmed Bookings";
+      case "cancelled":
+        return "Cancelled Bookings";
+      default:
+        return "All Bookings";
+    }
+  };
 
   const verifyMutation = useMutation({
     mutationFn: ({ id, status }: { id: string; status: 'approved' | 'rejected' }) => api.verifyBooking(id, status),
@@ -181,532 +252,298 @@ const AdminBookings = (): JSX.Element => {
     }
   };
 
+  // Helper to get status display name and color
+  const getStatusDisplay = (status: string) => {
+    switch (status) {
+      case 'approval_pending':
+        return { label: 'Approval Pending', color: 'bg-orange-100 text-orange-700 border-orange-200' };
+      case 'payment_pending':
+        return { label: 'Payment Pending', color: 'bg-amber-100 text-amber-700 border-amber-200' };
+      case 'payment_verification_pending':
+        return { label: 'Payment Verification Pending', color: 'bg-blue-100 text-blue-700 border-blue-200' };
+      case 'confirmed':
+        return { label: 'Confirmed', color: 'bg-green-100 text-green-700 border-green-200' };
+      case 'cancelled':
+        return { label: 'Cancelled', color: 'bg-red-100 text-red-700 border-red-200' };
+      default:
+        return { label: 'Pending', color: 'bg-gray-100 text-gray-700 border-gray-200' };
+    }
+  };
+
+  // Render expanded details based on status
+  const renderExpandedDetails = (b: any, bookingStatus: string) => {
+    const customerName = b.customer_name || (typeof b.customer === 'object' ? (b.customer?.name || 'Guest') : 'Guest');
+    const propertyName = b.property_name || 'Unknown';
+    const transactionId = b.manual_reference || '-';
+
+    return (
+      <div className="p-6 bg-muted/40 rounded-md space-y-4">
+        {/* Basic Booking Details */}
+        <div className="grid grid-cols-2 gap-4 text-sm">
+          <div><span className="font-medium">Customer:</span> {customerName}</div>
+          <div><span className="font-medium">Property:</span> {propertyName}</div>
+          <div><span className="font-medium">Check-in:</span> {formatDate(b.check_in_date)}</div>
+          <div><span className="font-medium">Check-out:</span> {formatDate(b.check_out_date)}</div>
+          <div><span className="font-medium">Guests:</span> {b.num_guests || 0}</div>
+          <div><span className="font-medium">Food Required:</span> {b.food_required ? 'Yes' : 'No'}</div>
+          {b.food_preference && (
+            <div><span className="font-medium">Food Preference:</span> {b.food_preference}</div>
+          )}
+          {b.allergies && (
+            <div><span className="font-medium">Allergies:</span> {b.allergies}</div>
+          )}
+        </div>
+
+        {/* Cost Breakdown */}
+        <div className="border-t pt-4">
+          <h4 className="font-semibold mb-3">Cost Breakdown</h4>
+          <div className="space-y-2 text-sm">
+            <div className="flex justify-between">
+              <span>Base amount (1 day):</span>
+              <span>{formatINR(Number(b.base_amount || 0))}</span>
+            </div>
+            {Number(b.guest_charges || 0) > 0 && (
+              <div className="flex justify-between">
+                <span>Guest charges ({b.num_guests || 0} guests):</span>
+                <span>{formatINR(Number(b.guest_charges || 0))}</span>
+              </div>
+            )}
+            {Number(b.extra_fees || 0) > 0 && (
+              <div className="flex justify-between">
+                <span>Extra fees (food, cleaning, service):</span>
+                <span>{formatINR(Number(b.extra_fees || 0))}</span>
+              </div>
+            )}
+            <div className="flex justify-between font-semibold text-base pt-2 border-t">
+              <span>Total Amount:</span>
+              <span>{formatINR(Number(b.total_amount || 0))}</span>
+            </div>
+            <div className="flex justify-between text-sm pt-1">
+              <span>Advance Paid (50%):</span>
+              <span className="font-semibold text-primary">{formatINR(Number(b.advance_paid || 0))}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Payment Details - Show for payment_verification_pending */}
+        {bookingStatus === 'payment_verification_pending' && (
+          <div className="border-t pt-4">
+            <h4 className="font-semibold mb-3">Payment Details</h4>
+            <div className="space-y-2 text-sm">
+              <div>
+                <span className="font-medium">Transaction ID:</span>{' '}
+                <span className="font-mono text-base font-semibold text-green-700 bg-green-50 px-2 py-1 rounded">
+                  {transactionId}
+                </span>
+              </div>
+              {b.payment_screenshot_url && (
+                <div>
+                  <span className="font-medium mb-2 block">Payment Screenshot:</span>
+                  <div className="border rounded-lg overflow-hidden max-w-md">
+                    <img 
+                      src={b.payment_screenshot_url} 
+                      alt="Payment screenshot" 
+                      className="w-full h-auto max-h-96 object-contain bg-muted"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src = '/placeholder.svg';
+                      }}
+                    />
+                    <div className="p-2 bg-muted border-t">
+                      <Button 
+                        size="sm" 
+                        variant="outline"
+                        onClick={() => window.open(b.payment_screenshot_url, '_blank')}
+                      >
+                        Open Full Size
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ID Proofs - Show for approval_pending and payment_verification_pending */}
+        {(bookingStatus === 'approval_pending' || bookingStatus === 'payment_verification_pending') && 
+         b.id_proofs && Array.isArray(b.id_proofs) && b.id_proofs.length > 0 && (
+          <div className="border-t pt-4">
+            <h4 className="font-semibold mb-3">ID Proofs</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {b.id_proofs.map((proofUrl: string, index: number) => (
+                <div key={index} className="border rounded-lg overflow-hidden">
+                  {proofUrl.toLowerCase().endsWith('.pdf') ? (
+                    <div className="p-4 bg-muted">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium">ID Proof {index + 1} (PDF)</span>
+                        <Button size="sm" variant="outline" onClick={() => window.open(proofUrl, '_blank')}>
+                          Open PDF
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="relative">
+                      <img 
+                        src={proofUrl} 
+                        alt={`ID Proof ${index + 1}`}
+                        className="w-full h-auto max-h-64 object-contain bg-muted"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src = '/placeholder.svg';
+                        }}
+                      />
+                      <div className="absolute top-2 right-2">
+                        <Button 
+                          size="sm" 
+                          variant="secondary" 
+                          onClick={() => window.open(proofUrl, '_blank')}
+                          className="bg-black/50 text-white hover:bg-black/70"
+                        >
+                          Open Full Size
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Action Buttons based on status */}
+        <div className="flex gap-2 pt-4 border-t">
+          {bookingStatus === 'approval_pending' && (
+            <Button size="sm" variant="outline" onClick={() => handleViewIds(b)}>
+              View IDs
+            </Button>
+          )}
+          {bookingStatus === 'payment_verification_pending' && (
+            <Button 
+              size="sm" 
+              onClick={() => confirmMutation.mutate(b.id || b._id)} 
+              disabled={confirmMutation.isPending}
+              className="bg-green-600 hover:bg-green-700"
+            >
+              {confirmMutation.isPending ? 'Confirming...' : 'Verify Payment & Confirm Booking'}
+            </Button>
+          )}
+          {bookingStatus !== 'cancelled' && bookingStatus !== 'completed' && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => handleCancelClick(b.id || b._id)}
+              disabled={cancelMutation.isPending}
+              className="gap-1 text-destructive hover:text-destructive"
+            >
+              <XCircle className="h-3 w-3" />
+              Cancel
+            </Button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div>
-        <h1 className="text-3xl font-bold mb-2">Bookings</h1>
+        <h1 className="text-3xl font-bold mb-2">{getTitle()}</h1>
         <p className="text-muted-foreground">
           View and manage all property bookings
         </p>
       </div>
 
-      <Card className="shadow-soft mb-6">
-        <CardHeader>
-          <CardTitle>Pending Approvals</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="text-center py-6 text-muted-foreground">Loading...</div>
-          ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Booking #</TableHead>
-                    <TableHead>Customer</TableHead>
-                    <TableHead>Date</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Action</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {(bookings || []).filter((b: any) => (b.verification_status || 'pending') === 'pending').map((b: any) => (
-                    <TableRow key={b.id || b._id}>
-                      <TableCell className="font-mono text-sm">{b.id || b._id}</TableCell>
-                      <TableCell>{typeof b.customer === 'object' ? (b.customer?.name || 'Guest') : 'Guest'}</TableCell>
-                      <TableCell>{(b.check_in_date || '').toString()}</TableCell>
-                      <TableCell><span className="text-orange-600 text-xs px-2 py-1 bg-orange-100 rounded-full">Pending</span></TableCell>
-                      <TableCell>
-                        <div className="flex gap-2">
-                          <Button size="sm" variant="outline" onClick={() => handleViewIds(b)}>View IDs</Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card className="shadow-soft mb-6">
-        <CardHeader>
-          <CardTitle>Upcoming Bookings</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="text-center py-6 text-muted-foreground">Loading...</div>
-          ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Booking #</TableHead>
-                    <TableHead>Property</TableHead>
-                    <TableHead>Customer</TableHead>
-                    <TableHead>Check-in</TableHead>
-                    <TableHead>Check-out</TableHead>
-                    <TableHead>Guests</TableHead>
-                    <TableHead>Total</TableHead>
-                    <TableHead>Advance</TableHead>
-                    <TableHead>Status</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {(bookings || [])
-                    .map((b: any) => ({
-                      ...b,
-                      _out: new Date(b.check_out_date || b.checkOut || 0)
-                    }))
-                    .filter((b: any) => (b.verification_status || '') === 'approved' && (b.status || '') === 'confirmed' && b._out >= new Date())
-                    .map((booking: any) => {
-                      const propertyName = booking.property_name || booking.property?.name || 'Unknown';
-                      const customerName = booking.customer_name || booking.customer?.name || 'Guest';
-                      const customerEmail = booking.customer?.email || '';
-                      // Use only the fields that backend stores - total_amount and advance_paid
-                      const totalAmount = Number(booking.total_amount ?? 0);
-                      const advancePaid = Number(booking.advance_paid ?? 0);
-                      const bookingId = booking._id || booking.id || '';
-                      if (!bookingId) return null;
-                      return (
-                        <TableRow key={bookingId}>
-                          <TableCell className="font-mono text-sm">{bookingId}</TableCell>
-                          <TableCell className="font-medium">{propertyName}</TableCell>
-                          <TableCell>
-                            <div>
-                              <div className="font-medium">{customerName}</div>
-                              {customerEmail && <div className="text-xs text-muted-foreground">{customerEmail}</div>}
-                            </div>
-                          </TableCell>
-                          <TableCell>{formatDate(booking.check_in_date || booking.checkIn)}</TableCell>
-                          <TableCell>{formatDate(booking.check_out_date || booking.checkOut)}</TableCell>
-                          <TableCell>{booking.num_guests || booking.numberOfGuests || 0}</TableCell>
-                          <TableCell className="font-medium">{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(totalAmount)}</TableCell>
-                          <TableCell>{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(advancePaid)}</TableCell>
-                          <TableCell>
-                            <span className={`px-2 py-1 rounded-full text-xs font-semibold border ${getStatusColor(booking.status)}`}>{booking.status}</span>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card className="shadow-soft mb-6">
-        <CardHeader>
-          <CardTitle>Cancelled Bookings</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="text-center py-6 text-muted-foreground">Loading...</div>
-          ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Booking #</TableHead>
-                    <TableHead>Property</TableHead>
-                    <TableHead>Customer</TableHead>
-                    <TableHead>Check-in</TableHead>
-                    <TableHead>Check-out</TableHead>
-                    <TableHead>Guests</TableHead>
-                    <TableHead>Total</TableHead>
-                    <TableHead>Advance</TableHead>
-                    <TableHead>Status</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {(bookings || [])
-                    .filter((b: any) => (b.verification_status || '') === 'approved' && (b.status || '') === 'cancelled')
-                    .map((booking: any) => {
-                      const propertyName = booking.property_name || booking.property?.name || 'Unknown';
-                      const customerName = booking.customer_name || booking.customer?.name || 'Guest';
-                      const customerEmail = booking.customer?.email || '';
-                      // Use only the fields that backend stores - total_amount and advance_paid
-                      const totalAmount = Number(booking.total_amount ?? 0);
-                      const advancePaid = Number(booking.advance_paid ?? 0);
-                      const bookingId = booking._id || booking.id || '';
-                      if (!bookingId) return null;
-                      return (
-                        <TableRow key={bookingId}>
-                          <TableCell className="font-mono text-sm">{bookingId}</TableCell>
-                          <TableCell className="font-medium">{propertyName}</TableCell>
-                          <TableCell>
-                            <div>
-                              <div className="font-medium">{customerName}</div>
-                              {customerEmail && <div className="text-xs text-muted-foreground">{customerEmail}</div>}
-                            </div>
-                          </TableCell>
-                          <TableCell>{formatDate(booking.check_in_date || booking.checkIn)}</TableCell>
-                          <TableCell>{formatDate(booking.check_out_date || booking.checkOut)}</TableCell>
-                          <TableCell>{booking.num_guests || booking.numberOfGuests || 0}</TableCell>
-                          <TableCell className="font-medium">{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(totalAmount)}</TableCell>
-                          <TableCell>{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(advancePaid)}</TableCell>
-                          <TableCell>
-                            <span className={`px-2 py-1 rounded-full text-xs font-semibold border ${getStatusColor(booking.status)}`}>{booking.status}</span>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card className="shadow-soft mb-6">
-        <CardHeader>
-          <CardTitle>Payment Verification</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="text-center py-6 text-muted-foreground">Loading...</div>
-          ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Booking #</TableHead>
-                    <TableHead>Customer</TableHead>
-                    <TableHead>Property</TableHead>
-                    <TableHead>Date</TableHead>
-                    <TableHead>Total</TableHead>
-                    <TableHead>Advance Paid</TableHead>
-                    <TableHead>Transaction ID</TableHead>
-                    <TableHead>Action</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {(bookings || [])
-                    .filter((b: any) => 
-                      (b.verification_status || '') === 'approved' && 
-                      (b.status || '') === 'pending' &&
-                      (b.manual_reference || '').trim() !== '' &&
-                      (b.payment_screenshot_url || '').trim() !== ''
-                    )
-                    .map((b: any) => {
-                      const customerName = b.customer_name || (typeof b.customer === 'object' ? (b.customer?.name || 'Guest') : 'Guest');
-                      const propertyName = b.property_name || 'Unknown';
-                      const transactionId = b.manual_reference || '-';
-                      const formatINR = (n: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(n);
-                      return (
-                      <>
-                      <TableRow key={(b.id || b._id) + '-row'}>
-                        <TableCell className="font-mono text-sm">{b.id || b._id}</TableCell>
-                        <TableCell className="font-medium">{customerName}</TableCell>
-                        <TableCell>{propertyName}</TableCell>
-                        <TableCell>{formatDate(b.check_in_date)}</TableCell>
-                        <TableCell>
-                          {formatINR(Number(b.total_amount ?? 0))}
-                        </TableCell>
-                        <TableCell>
-                          {formatINR(Number(b.advance_paid ?? 0))}
-                        </TableCell>
-                        <TableCell>
-                          <span className="font-mono text-sm font-semibold text-green-700">
-                            {transactionId}
-                          </span>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex gap-2">
-                            <Button 
-                              size="sm" 
-                              variant="secondary" 
-                              onClick={() => setOpenPendingDetail(openPendingDetail === (b.id || b._id) ? null : (b.id || b._id))}
-                            >
-                              {openPendingDetail === (b.id || b._id) ? 'Hide' : 'View'} Details
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                      {openPendingDetail === (b.id || b._id) && (
-                        <TableRow key={(b.id || b._id) + '-detail'}>
-                          <TableCell colSpan={8}>
-                            <div className="p-6 bg-muted/40 rounded-md space-y-4">
-                              {/* Basic Booking Details */}
-                              <div className="grid grid-cols-2 gap-4 text-sm">
-                                <div><span className="font-medium">Customer:</span> {customerName}</div>
-                                <div><span className="font-medium">Property:</span> {propertyName}</div>
-                                <div><span className="font-medium">Check-in:</span> {formatDate(b.check_in_date)}</div>
-                                <div><span className="font-medium">Check-out:</span> {formatDate(b.check_out_date)}</div>
-                                <div><span className="font-medium">Guests:</span> {b.num_guests || 0}</div>
-                                <div><span className="font-medium">Food Required:</span> {b.food_required ? 'Yes' : 'No'}</div>
-                                {b.food_preference && (
-                                  <div><span className="font-medium">Food Preference:</span> {b.food_preference}</div>
-                                )}
-                                {b.allergies && (
-                                  <div><span className="font-medium">Allergies:</span> {b.allergies}</div>
-                                )}
-                              </div>
-
-                              {/* Cost Breakdown */}
-                              <div className="border-t pt-4">
-                                <h4 className="font-semibold mb-3">Cost Breakdown</h4>
-                                <div className="space-y-2 text-sm">
-                                  <div className="flex justify-between">
-                                    <span>Base amount (1 day):</span>
-                                    <span>{formatINR(Number(b.base_amount || 0))}</span>
-                                  </div>
-                                  {Number(b.guest_charges || 0) > 0 && (
-                                    <div className="flex justify-between">
-                                      <span>Guest charges ({b.num_guests || 0} guests):</span>
-                                      <span>{formatINR(Number(b.guest_charges || 0))}</span>
-                                    </div>
-                                  )}
-                                  {Number(b.extra_fees || 0) > 0 && (
-                                    <div className="flex justify-between">
-                                      <span>Extra fees (food, cleaning, service):</span>
-                                      <span>{formatINR(Number(b.extra_fees || 0))}</span>
-                                    </div>
-                                  )}
-                                  <div className="flex justify-between font-semibold text-base pt-2 border-t">
-                                    <span>Total Amount:</span>
-                                    <span>{formatINR(Number(b.total_amount || 0))}</span>
-                                  </div>
-                                  <div className="flex justify-between text-sm pt-1">
-                                    <span>Advance Paid (50%):</span>
-                                    <span className="font-semibold text-primary">{formatINR(Number(b.advance_paid || 0))}</span>
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* Payment Details */}
-                              <div className="border-t pt-4">
-                                <h4 className="font-semibold mb-3">Payment Details</h4>
-                                <div className="space-y-2 text-sm">
-                                  <div>
-                                    <span className="font-medium">Transaction ID:</span>{' '}
-                                    <span className="font-mono text-base font-semibold text-green-700 bg-green-50 px-2 py-1 rounded">
-                                      {transactionId}
-                                    </span>
-                                  </div>
-                                  {b.payment_screenshot_url && (
-                                    <div>
-                                      <span className="font-medium mb-2 block">Payment Screenshot:</span>
-                                      <div className="border rounded-lg overflow-hidden max-w-md">
-                                        <img 
-                                          src={b.payment_screenshot_url} 
-                                          alt="Payment screenshot" 
-                                          className="w-full h-auto max-h-96 object-contain bg-muted"
-                                          onError={(e) => {
-                                            (e.target as HTMLImageElement).src = '/placeholder.svg';
-                                          }}
-                                        />
-                                        <div className="p-2 bg-muted border-t">
-                                          <Button 
-                                            size="sm" 
-                                            variant="outline"
-                                            onClick={() => window.open(b.payment_screenshot_url, '_blank')}
-                                          >
-                                            Open Full Size
-                                          </Button>
-                                        </div>
-                                      </div>
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-
-                              {/* ID Proofs */}
-                              {b.id_proofs && Array.isArray(b.id_proofs) && b.id_proofs.length > 0 && (
-                                <div className="border-t pt-4">
-                                  <h4 className="font-semibold mb-3">ID Proofs</h4>
-                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    {b.id_proofs.map((proofUrl: string, index: number) => (
-                                      <div key={index} className="border rounded-lg overflow-hidden">
-                                        {proofUrl.toLowerCase().endsWith('.pdf') ? (
-                                          <div className="p-4 bg-muted">
-                                            <div className="flex items-center justify-between">
-                                              <span className="text-sm font-medium">ID Proof {index + 1} (PDF)</span>
-                                              <Button size="sm" variant="outline" onClick={() => window.open(proofUrl, '_blank')}>
-                                                Open PDF
-                                              </Button>
-                                            </div>
-                                          </div>
-                                        ) : (
-                                          <div className="relative">
-                                            <img 
-                                              src={proofUrl} 
-                                              alt={`ID Proof ${index + 1}`}
-                                              className="w-full h-auto max-h-64 object-contain bg-muted"
-                                              onError={(e) => {
-                                                (e.target as HTMLImageElement).src = '/placeholder.svg';
-                                              }}
-                                            />
-                                            <div className="absolute top-2 right-2">
-                                              <Button 
-                                                size="sm" 
-                                                variant="secondary" 
-                                                onClick={() => window.open(proofUrl, '_blank')}
-                                                className="bg-black/50 text-white hover:bg-black/70"
-                                              >
-                                                Open Full Size
-                                              </Button>
-                                            </div>
-                                          </div>
-                                        )}
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-
-                              {/* Action Button */}
-                              <div className="flex gap-2 pt-4 border-t">
-                                <Button 
-                                  size="sm" 
-                                  onClick={() => confirmMutation.mutate(b.id || b._id)} 
-                                  disabled={confirmMutation.isPending}
-                                  className="bg-green-600 hover:bg-green-700"
-                                >
-                                  {confirmMutation.isPending ? 'Confirming...' : 'Verify Payment & Confirm Booking'}
-                                </Button>
-                              </div>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      )}
-                      </>
-                    )})}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
       <Card className="shadow-soft">
         <CardHeader>
-          <CardTitle>All Bookings</CardTitle>
+          <CardTitle>{getTitle()}</CardTitle>
         </CardHeader>
         <CardContent>
+          <Tabs value={statusFilter} onValueChange={setStatusFilter} className="mb-4">
+            <TabsList>
+              <TabsTrigger value="all">All</TabsTrigger>
+              <TabsTrigger value="approval_pending">Approval Pending</TabsTrigger>
+              <TabsTrigger value="payment_pending">Payment Pending</TabsTrigger>
+              <TabsTrigger value="payment_verification_pending">Payment Verification</TabsTrigger>
+              <TabsTrigger value="confirmed">Confirmed</TabsTrigger>
+              <TabsTrigger value="cancelled">Cancelled</TabsTrigger>
+            </TabsList>
+          </Tabs>
+          
           {isLoading ? (
             <div className="text-center py-8 text-muted-foreground">
               <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
               Loading bookings...
             </div>
-          ) : bookings.length > 0 ? (
+          ) : filteredBookings.length > 0 ? (
             <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Booking #</TableHead>
-                    <TableHead>Property</TableHead>
-                    <TableHead>Customer</TableHead>
-                    <TableHead>Check-in</TableHead>
-                    <TableHead>Check-out</TableHead>
-                    <TableHead>Guests</TableHead>
-                    <TableHead>Total</TableHead>
-                    <TableHead>Advance</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {bookings
-                    .filter((b: any) => (b.verification_status || '') === 'approved' && (b.status || '') === 'confirmed')
-                    .map((booking: Booking) => {
-                    const property = booking.property;
-                    const customer = booking.customer;
-                    const propertyName = (booking as any).property_name || (typeof property === 'object' && property !== null ? (property as any).name : '') || 'Unknown';
-                    const customerName = (booking as any).customer_name || (typeof customer === 'object' && customer !== null ? (customer as any).name : '') || 'Guest';
-                    const customerEmail =
-                      typeof customer === "object" && customer !== null
-                        ? customer.email || ""
-                        : "";
-                    // Use only the fields that backend stores - total_amount and advance_paid
-                    const totalAmount = Number((booking as any).total_amount ?? 0);
-                    const advancePaid = Number((booking as any).advance_paid ?? 0);
-                    const checkInDate = (booking as any).check_in_date ?? (booking as any).checkIn;
-                    const checkOutDate = (booking as any).check_out_date ?? (booking as any).checkOut;
-                    const bookingId = booking._id || booking.id || "";
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Booking #</TableHead>
+                      <TableHead>Property</TableHead>
+                      <TableHead>Customer</TableHead>
+                      <TableHead>Check-in</TableHead>
+                      <TableHead>Check-out</TableHead>
+                      <TableHead>Guests</TableHead>
+                      <TableHead>Total</TableHead>
+                      <TableHead>Advance</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredBookings.map((b: any) => {
+                      const bookingStatus = getBookingStatus(b);
+                      const statusDisplay = getStatusDisplay(bookingStatus);
+                      const customerName = b.customer_name || (typeof b.customer === 'object' ? (b.customer?.name || 'Guest') : 'Guest');
+                      const propertyName = b.property_name || 'Unknown';
+                      const bookingId = b.id || b._id;
+                      
+                      if (!bookingId) return null;
 
-                    if (!bookingId) return null;
-
-                    return (
-                      <TableRow key={bookingId}>
-                        <TableCell className="font-mono text-sm">
-                          {booking.bookingNumber || booking.booking_number || booking.id || booking._id || "N/A"}
-                        </TableCell>
-                        <TableCell className="font-medium">
-                          {propertyName}
-                        </TableCell>
-                        <TableCell>
-                          <div>
-                            <div className="font-medium">{customerName}</div>
-                            {customerEmail && (
-                              <div className="text-xs text-muted-foreground">
-                                {customerEmail}
-                              </div>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell>{formatDate(checkInDate)}</TableCell>
-                        <TableCell>{formatDate(checkOutDate)}</TableCell>
-                        <TableCell>
-                          {booking.numberOfGuests || booking.num_guests || 0}
-                        </TableCell>
-                        <TableCell className="font-medium">
-                          {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(totalAmount)}
-                        </TableCell>
-                        <TableCell>
-                          {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(advancePaid)}
-                        </TableCell>
-                        <TableCell>
-                          <span
-                            className={`px-2 py-1 rounded-full text-xs font-semibold border ${getStatusColor(
-                              booking.status
-                            )}`}
-                          >
-                            {booking.status || "N/A"}
-                          </span>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex gap-2">
-                            {booking.status === "pending" && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() =>
-                                  confirmMutation.mutate(bookingId)
-                                }
-                                disabled={confirmMutation.isPending}
-                                className="gap-1"
-                              >
-                                <CheckCircle2 className="h-3 w-3" />
-                                Confirm
-                              </Button>
-                            )}
-                            {booking.status !== "cancelled" &&
-                              booking.status !== "completed" && (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => handleCancelClick(bookingId)}
-                                  disabled={cancelMutation.isPending}
-                                  className="gap-1 text-destructive hover:text-destructive"
+                      return (
+                        <>
+                          <TableRow key={bookingId}>
+                            <TableCell className="font-mono text-sm">{bookingId}</TableCell>
+                            <TableCell className="font-medium">{propertyName}</TableCell>
+                            <TableCell>{customerName}</TableCell>
+                            <TableCell>{formatDate(b.check_in_date)}</TableCell>
+                            <TableCell>{formatDate(b.check_out_date)}</TableCell>
+                            <TableCell>{b.num_guests || 0}</TableCell>
+                            <TableCell className="font-medium">{formatINR(Number(b.total_amount ?? 0))}</TableCell>
+                            <TableCell>{formatINR(Number(b.advance_paid ?? 0))}</TableCell>
+                            <TableCell>
+                              <span className={`px-2 py-1 rounded-full text-xs font-semibold border ${statusDisplay.color}`}>
+                                {statusDisplay.label}
+                              </span>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex gap-2">
+                                <Button 
+                                  size="sm" 
+                                  variant="secondary" 
+                                  onClick={() => setOpenDetail(openDetail === bookingId ? null : bookingId)}
                                 >
-                                  <XCircle className="h-3 w-3" />
-                                  Cancel
+                                  {openDetail === bookingId ? 'Hide' : 'View'} Details
                                 </Button>
-                              )}
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                          {openDetail === bookingId && (
+                            <TableRow>
+                              <TableCell colSpan={10}>
+                                {renderExpandedDetails(b, bookingStatus)}
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
             </div>
           ) : (
             <div className="text-center py-12 text-muted-foreground">
-              No bookings yet
+              No bookings found
             </div>
           )}
         </CardContent>

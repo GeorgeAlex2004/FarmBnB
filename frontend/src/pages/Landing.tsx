@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Navbar } from "@/components/Navbar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,10 +7,24 @@ import { Search, Calendar, Users as UsersIcon, Sparkles } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "@/contexts/AuthContext";
 
 const Landing = () => {
   const navigate = useNavigate();
+  const { isAdmin, loading } = useAuth();
   const [searchLocation, setSearchLocation] = useState("");
+
+  // Redirect admins to admin dashboard
+  useEffect(() => {
+    if (!loading && isAdmin) {
+      navigate("/admin/dashboard", { replace: true });
+    }
+  }, [loading, isAdmin, navigate]);
+
+  // Don't render landing page if user is admin
+  if (!loading && isAdmin) {
+    return null;
+  }
 
   const { data: propertiesResponse, isLoading } = useQuery({
     queryKey: ["featured-properties"],

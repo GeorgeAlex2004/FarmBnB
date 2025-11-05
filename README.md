@@ -21,11 +21,11 @@ If you want to set Root Directory manually:
 5. **Output Directory**: Auto-detected (`dist`)
 
 ### Environment Variables (set in Vercel Project Settings):
-- `VITE_API_BASE_URL` → Your API base URL (e.g., `https://api.example.com`)
+- `VITE_API_URL` → Your API base URL (e.g., `https://api.example.com/api`)
 - `VITE_UPI_ID` → UPI ID to display on the Payment page
 - `VITE_UPI_QR_CODE_URL` → Public URL to the QR code image
 
-**Note**: The root `vercel.json` configures the build to use the `frontend` directory. The `frontend/vercel.json` handles SPA routing.
+**Note**: The root `vercel.json` configures the build to use the `frontend` directory and also handles SPA routing via a catch-all rewrite to `index.html`.
 
 ## Local Development
 

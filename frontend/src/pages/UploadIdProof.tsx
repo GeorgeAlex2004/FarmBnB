@@ -12,18 +12,26 @@ const UploadIdProof = () => {
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [status, setStatus] = useState<'idle' | 'pending' | 'approved'>('idle');
+  const [idProofs, setIdProofs] = useState<string[]>([]);
+
+  const loadBooking = async () => {
+    try {
+      if (!bookingId) return;
+      const res = await api.getBooking(bookingId);
+      const booking = res.data;
+      const vs = (booking?.verification_status as string) || 'pending';
+      setStatus(vs === 'approved' ? 'approved' : 'pending');
+      // Load existing ID proofs
+      if (booking?.id_proofs && Array.isArray(booking.id_proofs)) {
+        setIdProofs(booking.id_proofs);
+      }
+    } catch (error) {
+      console.error('Failed to load booking:', error);
+    }
+  };
 
   useEffect(() => {
-    // Optionally fetch booking to display current status
-    const load = async () => {
-      try {
-        if (!bookingId) return;
-        const res = await api.getBooking(bookingId);
-        const vs = (res.data?.verification_status as string) || 'pending';
-        setStatus(vs === 'approved' ? 'approved' : 'pending');
-      } catch {}
-    };
-    load();
+    loadBooking();
   }, [bookingId]);
 
   const onUpload = async (files: FileList | null) => {
@@ -37,6 +45,8 @@ const UploadIdProof = () => {
       await api.uploadBookingIdProofs(bookingId, Array.from(files));
       setStatus('pending');
       toast.success('ID proofs uploaded. Awaiting admin approval.');
+      // Reload booking to get updated ID proofs
+      await loadBooking();
     } catch (e: any) {
       toast.error(e?.message || 'Failed to upload ID proofs');
     } finally {
@@ -58,6 +68,51 @@ const UploadIdProof = () => {
             <Button variant="outline" disabled={uploading} onClick={() => fileRef.current?.click()} className="w-full">
               {uploading ? 'Uploading...' : 'Select ID Proofs (min 2)'}
             </Button>
+            
+            {/* Display uploaded ID proofs */}
+            {idProofs.length > 0 && (
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold">Uploaded ID Proofs ({idProofs.length})</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {idProofs.map((proofUrl: string, index: number) => (
+                    <div key={index} className="border rounded-lg overflow-hidden">
+                      {proofUrl.toLowerCase().endsWith('.pdf') ? (
+                        <div className="p-4 bg-muted">
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm font-medium">ID Proof {index + 1} (PDF)</span>
+                            <Button size="sm" variant="outline" onClick={() => window.open(proofUrl, '_blank')}>
+                              Open PDF
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="relative">
+                          <img 
+                            src={proofUrl} 
+                            alt={`ID Proof ${index + 1}`}
+                            className="w-full h-auto max-h-64 object-contain bg-muted"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).src = '/placeholder.svg';
+                            }}
+                          />
+                          <div className="absolute top-2 right-2">
+                            <Button 
+                              size="sm" 
+                              variant="secondary" 
+                              onClick={() => window.open(proofUrl, '_blank')}
+                              className="bg-black/50 text-white hover:bg-black/70"
+                            >
+                              Open Full Size
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            
             {status === 'pending' && (
               <div className="p-3 rounded-md bg-amber-50 border border-amber-200 text-sm text-amber-900">
                 Pending approval. We will notify you once approved.
