@@ -1,9 +1,17 @@
 const express = require('express');
 const { body, validationResult, query } = require('express-validator');
-const { supabase } = require('../utils/supabase');
+const { supabase, isSupabaseConfigured } = require('../utils/supabase');
 const { verifyFirebaseToken, requireAdmin } = require('../middleware/firebaseAuth');
 
 const router = express.Router();
+
+// Return a clear response if Supabase is not configured
+router.use((req, res, next) => {
+  if (!isSupabaseConfigured) {
+    return res.status(503).json({ success: false, message: 'Service unavailable: Supabase is not configured on the server.' });
+  }
+  next();
+});
 
 // Helper to normalize facilities to array of plain strings
 function normalizeFacilitiesArray(arr) {

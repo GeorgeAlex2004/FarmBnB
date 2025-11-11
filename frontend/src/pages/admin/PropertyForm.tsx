@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -150,18 +149,10 @@ const PropertyForm = () => {
 
     setUploading(true);
     try {
-      const BUCKET = 'images';
       const fileArray = Array.from(files);
-      const uploaded: Array<{ url: string; filename?: string }> = [];
-      for (const f of fileArray) {
-        const ext = f.name.split('.').pop() || 'jpg';
-        const path = `properties/${Date.now()}-${Math.round(Math.random()*1e9)}.${ext}`;
-        const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, f, { upsert: false, contentType: f.type });
-        if (upErr) throw upErr;
-        const { data: pub } = supabase.storage.from(BUCKET).getPublicUrl(path);
-        uploaded.push({ url: pub.publicUrl, filename: path });
-      }
-      const newImages = uploaded.map((img) => ({ url: img.url, filename: img.filename, isPrimary: false }));
+      const result = await api.uploadImages(fileArray);
+      const uploaded = (result.data || []) as Array<{ url: string; path?: string }>;
+      const newImages = uploaded.map((img) => ({ url: img.url, filename: img.path, isPrimary: false }));
       setFormData((prev) => ({ ...prev, images: [...prev.images, ...newImages] }));
       toast.success(`Successfully uploaded ${newImages.length} image(s)`);
     } catch (error: any) {
@@ -176,17 +167,10 @@ const PropertyForm = () => {
 
     setUploading(true);
     try {
-      const BUCKET = 'images';
       const fileArray = Array.from(files);
-      const newVideos: string[] = [];
-      for (const f of fileArray) {
-        const ext = f.name.split('.').pop() || 'mp4';
-        const path = `properties/${Date.now()}-${Math.round(Math.random()*1e9)}.${ext}`;
-        const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, f, { upsert: false, contentType: f.type });
-        if (upErr) throw upErr;
-        const { data: pub } = supabase.storage.from(BUCKET).getPublicUrl(path);
-        newVideos.push(pub.publicUrl);
-      }
+      const result = await api.uploadVideos(fileArray);
+      const uploaded = (result.data || []) as Array<{ url: string }>;
+      const newVideos: string[] = uploaded.map((u) => u.url);
       setFormData((prev) => ({ ...prev, videos: [...prev.videos, ...newVideos] }));
       toast.success(`Successfully uploaded ${newVideos.length} video(s)`);
     } catch (error: any) {

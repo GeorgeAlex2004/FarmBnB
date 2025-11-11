@@ -21,11 +21,6 @@ const Landing = () => {
     }
   }, [loading, isAdmin, navigate]);
 
-  // Don't render landing page if user is admin
-  if (!loading && isAdmin) {
-    return null;
-  }
-
   const { data: propertiesResponse, isLoading } = useQuery({
     queryKey: ["featured-properties"],
     queryFn: async () => {
@@ -33,6 +28,11 @@ const Landing = () => {
       return response;
     },
   });
+
+  // After hooks are declared, optionally short-circuit rendering for admins
+  if (!loading && isAdmin) {
+    return null;
+  }
 
   const handleSearch = () => {
     navigate(`/properties?search=${searchLocation}`);

@@ -3,6 +3,7 @@ import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Building, Calendar, DollarSign, Users } from "lucide-react";
 import { format } from "date-fns";
+import { Link } from "react-router-dom";
 
 const AdminDashboard = () => {
   const { data: propertiesResponse } = useQuery({
@@ -106,12 +107,14 @@ const AdminDashboard = () => {
               {recentBookings.map((booking: any) => {
                 const property = booking.property;
                 const customer = booking.customer;
-                const propertyName = typeof property === 'object' ? property?.name : 'Unknown';
-                const customerName = typeof customer === 'object' ? customer?.name : 'Guest';
+                const propertyName = booking.property_name || (typeof property === 'object' ? property?.name : null) || 'Unknown';
+                const customerName = booking.customer_name || (typeof customer === 'object' ? customer?.name : null) || 'Guest';
+                const bookingId = booking.id || booking._id;
                 
                 return (
-                  <div
-                    key={booking._id || booking.id}
+                  <Link
+                    key={bookingId}
+                    to={bookingId ? `/admin/bookings?selected=${bookingId}` : '/admin/bookings'}
                     className="flex items-center justify-between p-4 bg-muted/50 rounded-lg hover:bg-muted transition-colors"
                   >
                     <div>
@@ -140,7 +143,7 @@ const AdminDashboard = () => {
                         {booking.status}
                       </p>
                     </div>
-                  </div>
+                  </Link>
                 );
               })}
             </div>

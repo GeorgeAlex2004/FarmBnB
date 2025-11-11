@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Navbar } from "@/components/Navbar";
 import { Card, CardContent } from "@/components/ui/card";
@@ -7,6 +7,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -31,6 +32,9 @@ const MyBookings = () => {
   const [selectedBooking, setSelectedBooking] = useState<any>(null);
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
   const [showCancelled, setShowCancelled] = useState(false);
+  const [invoiceDialogOpen, setInvoiceDialogOpen] = useState(false);
+  const [invoiceHtml, setInvoiceHtml] = useState<string>("");
+  const invoiceFrameRef = useRef<HTMLIFrameElement | null>(null);
 
   const { user } = useAuth();
   const { data, isLoading } = useQuery({
@@ -167,6 +171,171 @@ const MyBookings = () => {
   const renderBookingCard = (b: any) => {
     const statusBadge = getStatusBadge(b._status);
     const isCancelled = b._status === 'cancelled';
+    const openInvoice = (row: any) => {
+      const bookingId = row.id || row._id || '';
+      const customerName = user?.name || user?.email || 'Guest';
+      const propertyName = row.property?.name || row.property_name || 'Unknown';
+      const checkIn = formatDate(row.check_in_date);
+      const checkOut = formatDate(row.check_out_date);
+      const guests = Number(row.num_guests || row.numberOfGuests || 0);
+      const nights = 1;
+      const baseAmount = Number(row.base_amount || 0);
+      const guestCharges = Number(row.guest_charges || 0);
+      const extraFees = Number(row.extra_fees || 0);
+      const subtotal = baseAmount + guestCharges + extraFees;
+      const taxRate = 0.18;
+      const taxAmount = Math.round(subtotal * taxRate * 100) / 100;
+      const grandTotal = subtotal + taxAmount;
+      const advancePaid = Number(row.advance_paid || 0);
+      const balance = Math.max(grandTotal - advancePaid, 0);
+      const transactionId = row.manual_reference || '';
+      const paymentMethod = row.payment_method === 'manual' ? 'online payment' : (row.payment_method || 'online payment');
+      const perHeadUnit = guests && nights ? guestCharges / (guests * nights) : 0;
+      const perHeadUnitStr = formatINR(perHeadUnit);
+      const foodChargesLine = row.food_required ? 500 * guests * nights : 0;
+      const otherFees = Math.max(extraFees - foodChargesLine, 0);
+      const logoUrl = `${window.location.origin}/logo.png`;
+
+      const html = `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Invoice - ${bookingId}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      body { font-family: Arial, Helvetica, sans-serif; color: #111827; padding: 24px; }
+      .container { max-width: 800px; margin: 0 auto; }
+      .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+      .brand { font-size: 20px; font-weight: 700; }
+      .meta { font-size: 12px; color: #6b7280; }
+      .section { border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+      .row { display: flex; flex-wrap: wrap; gap: 16px; }
+      .col { flex: 1 1 260px; }
+      .label { font-size: 12px; color: #6b7280; }
+      .value { font-size: 14px; font-weight: 600; }
+      table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+      th, td { text-align: left; padding: 8px; border-bottom: 1px solid #e5e7eb; }
+      tfoot td { font-weight: 700; }
+      .right { text-align: right; }
+      .badge { display: inline-block; padding: 2px 8px; border-radius: 9999px; border: 1px solid #e5e7eb; font-size: 12px; }
+      .muted { color: #6b7280; }
+      .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+      @media print { body { padding: 0; } }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <div style="display:flex; align-items:center; gap:12px;">
+          <img src="${logoUrl}" alt="FarmBnB" style="height:36px; width:auto;" onerror="this.style.display='none';" />
+          <div>
+            <div class="brand">FarmBnB</div>
+            <div class="muted" style="font-size:12px;margin-top:4px;">Invoice</div>
+          </div>
+        </div>
+        <div class="meta">
+          <div><strong>Booking #</strong> ${bookingId}</div>
+          <div>${new Date().toLocaleString()}</div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="two-col">
+          <div>
+            <div class="label">Billed To</div>
+            <div class="value">${customerName}</div>
+          </div>
+          <div>
+            <div class="label">Property</div>
+            <div class="value">${propertyName}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="row">
+          <div class="col">
+            <div class="label">Check-in</div>
+            <div class="value">${checkIn}</div>
+          </div>
+          <div class="col">
+            <div class="label">Check-out</div>
+            <div class="value">${checkOut}</div>
+          </div>
+          <div class="col">
+            <div class="label">Guests</div>
+            <div class="value">${guests} guest(s)</div>
+          </div>
+          <div class="col">
+            <div class="label">Payment Method</div>
+            <div class="value">${paymentMethod}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <table>
+          <thead>
+            <tr>
+              <th>Description</th>
+              <th class="right">Qty</th>
+              <th class="right">Amount (INR)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Base amount (1 day)</td>
+              <td class="right">1</td>
+              <td class="right">${formatINR(baseAmount)}</td>
+            </tr>
+            <tr>
+              <td>Guest charges</td>
+              <td class="right">${guests} × ${perHeadUnitStr}</td>
+              <td class="right">${formatINR(guestCharges)}</td>
+            </tr>
+            ${foodChargesLine > 0 ? `<tr>
+              <td>Food charges</td>
+              <td class="right">${guests} × ${formatINR(500)} × 1</td>
+              <td class="right">${formatINR(foodChargesLine)}</td>
+            </tr>` : ''}
+            ${otherFees > 0 ? `<tr>
+              <td>Other fees (cleaning, service)</td>
+              <td class="right">—</td>
+              <td class="right">${formatINR(otherFees)}</td>
+            </tr>` : ''}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td colspan="2">Subtotal</td>
+              <td class="right">${formatINR(subtotal)}</td>
+            </tr>
+            <tr>
+              <td colspan="2">Tax (18%)</td>
+              <td class="right">${formatINR(taxAmount)}</td>
+            </tr>
+            <tr>
+              <td colspan="2">Total</td>
+              <td class="right">${formatINR(grandTotal)}</td>
+            </tr>
+            <tr>
+              <td colspan="2">Advance Paid</td>
+              <td class="right">${formatINR(advancePaid)}</td>
+            </tr>
+            <tr>
+              <td colspan="2">Balance</td>
+              <td class="right">${formatINR(balance)}</td>
+            </tr>
+          </tfoot>
+        </table>
+        ${transactionId ? `<div class="muted" style="margin-top:8px;">Transaction ID: <span class="value">${transactionId}</span></div>` : ''}
+      </div>
+    </div>
+  </body>
+</html>`;
+
+      setInvoiceHtml(html);
+      setInvoiceDialogOpen(true);
+    };
     
     return (
       <Card key={b.id || b._id} className={`shadow-soft ${isCancelled ? 'opacity-75' : ''}`}>
@@ -260,6 +429,9 @@ const MyBookings = () => {
                 <>
                   <Button variant="outline" size="sm" onClick={() => handleViewBooking(b)}>
                     View
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => openInvoice(b)}>
+                    Invoice
                   </Button>
                   {b._status === 'confirmed' && (
                     <Button
@@ -482,6 +654,38 @@ const MyBookings = () => {
                 </div>
               </div>
             )}
+          </DialogContent>
+        </Dialog>
+
+        {/* Invoice Dialog */}
+        <Dialog open={invoiceDialogOpen} onOpenChange={setInvoiceDialogOpen}>
+          <DialogContent className="max-w-4xl">
+            <DialogHeader>
+              <DialogTitle>Invoice Preview</DialogTitle>
+              <DialogDescription>Download a PDF copy of your invoice.</DialogDescription>
+            </DialogHeader>
+            <div className="h-[70vh] border rounded overflow-hidden bg-white">
+              <iframe
+                ref={invoiceFrameRef}
+                title="Invoice"
+                className="w-full h-full"
+                srcDoc={invoiceHtml}
+              />
+            </div>
+            <DialogFooter className="gap-2">
+              <Button
+                onClick={() => {
+                  const frame = invoiceFrameRef.current;
+                  if (frame && frame.contentWindow) {
+                    frame.contentWindow.focus();
+                    frame.contentWindow.print();
+                  }
+                }}
+              >
+                Download PDF
+              </Button>
+              <Button variant="ghost" onClick={() => setInvoiceDialogOpen(false)}>Close</Button>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
       </div>

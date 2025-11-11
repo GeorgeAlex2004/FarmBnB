@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
-import { supabase } from "@/integrations/supabase/client";
+import api from "@/lib/api";
 
 const PaymentPage = () => {
   const { bookingId } = useParams();
@@ -23,15 +23,11 @@ const PaymentPage = () => {
     const init = async () => {
       if (!bookingId) return;
       try {
-        const { data: bookingRes, error } = await supabase
-          .from('bookings')
-          .select('*')
-          .eq('id', bookingId)
-          .single();
-        if (error) throw error;
-        setBooking(bookingRes);
-        const advanceTarget = Math.round(Number(bookingRes.total_amount || 0) * 0.5 * 100) / 100;
-        const alreadyPaid = Number(bookingRes.advance_paid || 0);
+        const bookingRes = await api.getBooking(bookingId);
+        const bookingRow = bookingRes.data;
+        setBooking(bookingRow);
+        const advanceTarget = Math.round(Number(bookingRow.total_amount || 0) * 0.5 * 100) / 100;
+        const alreadyPaid = Number(bookingRow.advance_paid || 0);
         setAmount(Math.max(advanceTarget - alreadyPaid, 0));
       } catch (e: any) {
         toast.error(e?.message || "Failed to initialize payment");
@@ -57,29 +53,15 @@ const PaymentPage = () => {
   const handleConfirm = async () => {
     if (!bookingId) return;
     try {
-      // Upload screenshot to Supabase Storage
-      let paymentScreenshotUrl: string | null = null;
-      if (paymentScreenshot) {
-        const BUCKET = 'images';
-        const ext = paymentScreenshot.name.split('.').pop() || 'jpg';
-        const path = `payment_screenshots/${bookingId}/${Date.now()}-${Math.round(Math.random()*1e9)}.${ext}`;
-        const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, paymentScreenshot, { upsert: false, contentType: paymentScreenshot.type });
-        if (upErr) throw upErr;
-        const { data: pub } = supabase.storage.from(BUCKET).getPublicUrl(path);
-        paymentScreenshotUrl = pub.publicUrl;
+      if (!paymentScreenshot) {
+        toast.error("Payment screenshot is required");
+        return;
       }
 
-      // Update booking with manual payment details
-      const { error: updErr } = await supabase
-        .from('bookings')
-        .update({
-          advance_paid: Number(booking?.advance_paid || 0) + Number(amount || 0),
-          payment_method: 'manual',
-          manual_reference: referenceId || null,
-          payment_screenshot_url: paymentScreenshotUrl,
-        })
-        .eq('id', bookingId);
-      if (updErr) throw updErr;
+      await api.confirmPaymentWithScreenshot(bookingId, paymentScreenshot, {
+        referenceId,
+        amount,
+      });
 
       toast.success("Payment details submitted. Admin will verify the transaction and confirm your booking.");
       navigate("/bookings");

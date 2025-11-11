@@ -1,3 +1,6 @@
+// Ensure Firebase app is initialized before attempting to use firebase/auth in this module
+import '@/integrations/firebase';
+
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
 // Helper to get Firebase ID token from current user (fallback to legacy token)
@@ -353,6 +356,25 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify({ bookingId, paymentIntentId, referenceId: extra?.referenceId, amount: extra?.amount }),
     });
+  }
+
+  async confirmPaymentWithScreenshot(bookingId: string, file: File, extra?: { referenceId?: string; amount?: number }) {
+    const token = await getAuthToken();
+    const form = new FormData();
+    form.append('bookingId', bookingId);
+    form.append('paymentIntentId', 'manual');
+    if (extra?.referenceId) form.append('referenceId', extra.referenceId);
+    if (typeof extra?.amount === 'number') form.append('amount', String(extra.amount));
+    form.append('paymentScreenshot', file);
+
+    const response = await fetch(`${this.baseURL}/payments/confirm`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+      body: form,
+    });
+    return handleResponse(response);
   }
 
   async getPaymentDetails(bookingId: string) {

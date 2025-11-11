@@ -18,6 +18,8 @@ export const firebaseApp = getApps().length ? getApp() : initializeApp(firebaseC
 // Analytics is only available in the browser and when supported (HTTPS, etc.)
 export const analyticsPromise: Promise<Analytics | null> = (async () => {
   if (typeof window === "undefined") return null;
+  // Skip analytics if required config is missing to avoid noisy 400 warnings
+  if (!firebaseConfig.apiKey || !firebaseConfig.measurementId) return null;
   try {
     const supported = await isSupported();
     return supported ? getAnalytics(firebaseApp) : null;

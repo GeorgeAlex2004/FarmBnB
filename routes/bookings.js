@@ -1,6 +1,6 @@
 const express = require('express');
 const { body, validationResult, query } = require('express-validator');
-const { supabase } = require('../utils/supabase');
+const { supabase, isSupabaseConfigured } = require('../utils/supabase');
 const multer = require('multer');
 const path = require('path');
 const { verifyFirebaseToken, requireAdmin } = require('../middleware/firebaseAuth');
@@ -16,6 +16,14 @@ const idProofsFilter = (req, file, cb) => {
   else cb(new Error('Only image or PDF files are allowed'), false);
 };
 const uploadIdProofs = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 }, fileFilter: idProofsFilter });
+
+// Return a clear response if Supabase is not configured
+router.use((req, res, next) => {
+  if (!isSupabaseConfigured) {
+    return res.status(503).json({ success: false, message: 'Service unavailable: Supabase is not configured on the server.' });
+  }
+  next();
+});
 
 // Calculate booking pricing
 const calculateBookingPrice = (property, checkIn, checkOut, numberOfGuests) => {

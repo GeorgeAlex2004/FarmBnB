@@ -1,5 +1,6 @@
 // @ts-nocheck - Type errors are due to missing node_modules, install dependencies to resolve
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format, isValid, parseISO } from "date-fns";
 import { CheckCircle2, XCircle, Loader2 } from "lucide-react";
@@ -78,6 +79,8 @@ const AdminBookings = (): JSX.Element => {
     queryFn: () => api.getBookings({}),
   });
 
+  const [searchParams, setSearchParams] = useSearchParams();
+
   const confirmMutation = useMutation({
     mutationFn: (id: string) => api.confirmBooking(id),
     onSuccess: () => {
@@ -155,8 +158,244 @@ const AdminBookings = (): JSX.Element => {
   const [openPendingDetail, setOpenPendingDetail] = useState<string | null>(null);
   const [idProofDialogOpen, setIdProofDialogOpen] = useState(false);
   const [selectedBookingForIds, setSelectedBookingForIds] = useState<any>(null);
+  const [invoiceDialogOpen, setInvoiceDialogOpen] = useState(false);
+  const [invoiceHtml, setInvoiceHtml] = useState<string>("");
+  const invoiceFrameRef = useRef<HTMLIFrameElement | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [searchDate, setSearchDate] = useState<string>("");
   const formatINR = (n: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(n);
+  const formatDateShort = (date: string | Date | undefined): string => {
+    if (!date) return "N/A";
+    try {
+      const dateObj = typeof date === "string" ? parseISO(date) : new Date(date);
+      if (!isValid(dateObj)) return "Invalid Date";
+      return format(dateObj, "MMM dd, yyyy");
+    } catch {
+      return "Invalid Date";
+    }
+  };
+
+  // Open detail panel when navigated with ?selected=<id>
+  useEffect(() => {
+    const selected = searchParams.get('selected');
+    if (selected && bookings.some((b: any) => (b.id || b._id) === selected)) {
+      setOpenDetail(selected);
+      // remove the param after opening to avoid stale state on navigation
+      searchParams.delete('selected');
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [searchParams, setSearchParams, bookings]);
+
+  // Generate invoice (render in modal)
+  const openInvoice = (b: any) => {
+    const bookingId = b.id || b._id || '';
+    const customerName = b.customer_name || (typeof b.customer === 'object' ? (b.customer?.name || 'Guest') : 'Guest');
+    const propertyName = b.property_name || 'Unknown';
+    const checkIn = formatDateShort(b.check_in_date);
+    const checkOut = formatDateShort(b.check_out_date);
+    const guests = b.num_guests || 0;
+    const nights = 1; // Same-day policy
+    const baseAmount = Number(b.base_amount || 0);
+    const guestCharges = Number(b.guest_charges || 0);
+    const extraFees = Number(b.extra_fees || 0);
+    const totalAmount = Number(b.total_amount || 0);
+    const advancePaid = Number(b.advance_paid || 0);
+    const transactionId = b.manual_reference || '';
+    const status = (b.status || '').toString();
+    const paymentMethod = (b.payment_method || 'manual').toString();
+    const displayPaymentMethod = paymentMethod === 'manual' ? 'online payment' : paymentMethod;
+    const foodRequired = b.food_required ? 'Yes' : 'No';
+    const foodPreference = b.food_preference || '-';
+    const allergies = b.allergies || '-';
+    const verificationStatus = b.verification_status || '-';
+
+    // Tax placeholders (0% by default)
+    const subtotal = baseAmount + guestCharges + extraFees;
+    const taxRate = 0.18;
+    const taxAmount = Math.round(subtotal * taxRate * 100) / 100;
+    const grandTotal = subtotal + taxAmount;
+    const balance = Math.max(grandTotal - advancePaid, 0);
+    const perHeadUnit = guests && nights ? guestCharges / (guests * nights) : 0;
+    const perHeadUnitStr = formatINR(perHeadUnit);
+    const foodChargesLine = b.food_required ? 500 * guests * nights : 0;
+    const otherFees = Math.max(extraFees - foodChargesLine, 0);
+    const logoUrl = `${window.location.origin}/logo.png`;
+
+    const html = `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Invoice - ${bookingId}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      body { font-family: Arial, Helvetica, sans-serif; color: #111827; padding: 24px; }
+      .container { max-width: 800px; margin: 0 auto; }
+      .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+      .brand { font-size: 20px; font-weight: 700; }
+      .meta { font-size: 12px; color: #6b7280; }
+      h1 { font-size: 24px; margin: 16px 0; }
+      .section { border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+      .row { display: flex; flex-wrap: wrap; gap: 16px; }
+      .col { flex: 1 1 260px; }
+      .label { font-size: 12px; color: #6b7280; }
+      .value { font-size: 14px; font-weight: 600; }
+      table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+      th, td { text-align: left; padding: 8px; border-bottom: 1px solid #e5e7eb; }
+      tfoot td { font-weight: 700; }
+      .right { text-align: right; }
+      .badge { display: inline-block; padding: 2px 8px; border-radius: 9999px; border: 1px solid #e5e7eb; font-size: 12px; }
+      .muted { color: #6b7280; }
+      .note { font-size: 12px; color: #6b7280; margin-top: 8px; }
+      .actions { margin-top: 16px; }
+      .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+      .tag { font-size: 12px; background: #f3f4f6; border: 1px solid #e5e7eb; padding: 2px 6px; border-radius: 6px; display: inline-block; }
+      @media print {
+        .actions { display: none; }
+        body { padding: 0; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <div style="display:flex; align-items:center; gap:12px;">
+          <img src="${logoUrl}" alt="FarmBnB" style="height:36px; width:auto;" onerror="this.style.display='none';" />
+          <div>
+            <div class="brand">FarmBnB</div>
+            <div class="muted" style="font-size:12px;margin-top:4px;">
+              Invoice for day-use farm stay booking
+            </div>
+          </div>
+        </div>
+        <div class="meta">
+          <div><strong>Invoice</strong></div>
+          <div>Booking # ${bookingId}</div>
+          <div>${new Date().toLocaleString()}</div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="two-col">
+          <div>
+            <div class="label">Billed To</div>
+            <div class="value">${customerName}</div>
+            <div class="muted" style="font-size:12px;">Customer ID: ${b.customer_id || '-'}</div>
+          </div>
+          <div>
+            <div class="label">Property</div>
+            <div class="value">${propertyName}</div>
+            <div class="muted" style="font-size:12px;">Booking Status: <span class="badge">${status || 'pending'}</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="row">
+          <div class="col">
+            <div class="label">Check-in</div>
+            <div class="value">${checkIn}</div>
+          </div>
+          <div class="col">
+            <div class="label">Check-out</div>
+            <div class="value">${checkOut}</div>
+          </div>
+          <div class="col">
+            <div class="label">Guests</div>
+            <div class="value">${guests} guest(s)</div>
+          </div>
+          <div class="col">
+            <div class="label">Nights</div>
+            <div class="value">${nights}</div>
+          </div>
+          <div class="col">
+            <div class="label">Verification</div>
+            <div class="value"><span class="tag">${verificationStatus}</span></div>
+          </div>
+          <div class="col">
+            <div class="label">Payment Method</div>
+            <div class="value">${displayPaymentMethod}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="label">Booking Options</div>
+        <div class="muted" style="margin-bottom:8px;">Food required: <span class="value">${foodRequired}</span> &nbsp; | &nbsp; Preference: <span class="value">${foodPreference}</span> &nbsp; | &nbsp; Allergies: <span class="value">${allergies}</span></div>
+        <table>
+          <thead>
+            <tr>
+              <th>Description</th>
+              <th class="right">Qty</th>
+              <th class="right">Amount (INR)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Base amount (1 day)</td>
+              <td class="right">${nights}</td>
+              <td class="right">${formatINR(baseAmount)}</td>
+            </tr>
+            <tr>
+              <td>Guest charges</td>
+              <td class="right">${guests} × ${perHeadUnitStr}</td>
+              <td class="right">${formatINR(guestCharges)}</td>
+            </tr>
+            ${foodChargesLine > 0 ? `<tr>
+              <td>Food charges</td>
+              <td class="right">${guests} × ${formatINR(500)} × ${nights}</td>
+              <td class="right">${formatINR(foodChargesLine)}</td>
+            </tr>` : ''}
+            ${otherFees > 0 ? `<tr>
+              <td>Other fees (cleaning, service)</td>
+              <td class="right">—</td>
+              <td class="right">${formatINR(otherFees)}</td>
+            </tr>` : ''}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td colspan="2">Subtotal</td>
+              <td class="right">${formatINR(subtotal)}</td>
+            </tr>
+            <tr>
+              <td colspan="2">Tax (${(taxRate * 100).toFixed(0)}%)</td>
+              <td class="right">${formatINR(taxAmount)}</td>
+            </tr>
+            <tr>
+              <td colspan="2">Total</td>
+              <td class="right">${formatINR(grandTotal)}</td>
+            </tr>
+            <tr>
+              <td colspan="2">Advance Paid</td>
+              <td class="right">${formatINR(advancePaid)}</td>
+            </tr>
+            <tr>
+              <td colspan="2">Balance</td>
+              <td class="right">${formatINR(balance)}</td>
+            </tr>
+          </tfoot>
+        </table>
+        ${transactionId ? `<div class="note">Transaction ID: <span class="value">${transactionId}</span></div>` : ''}
+      </div>
+
+      <div class="section">
+        <div class="label">Terms & Notes</div>
+        <ul class="muted" style="font-size:12px; margin-top:6px; line-height:1.5;">
+          <li>Day-use only: Check-in 9:00 AM; Check-out 7:00 PM.</li>
+          <li>Outside food not allowed.</li>
+          <li>Advance is non-refundable. Balance (if any) to be settled on-site.</li>
+          <li>Carry a government-issued ID for verification at the property.</li>
+        </ul>
+      </div>
+
+      <div class="note">This is a system-generated invoice. For queries, contact support.</div>
+    </div>
+  </body>
+</html>`;
+
+    setInvoiceHtml(html);
+    setInvoiceDialogOpen(true);
+  };
 
   // Function to determine booking status
   const getBookingStatus = (booking: any): string => {
@@ -196,16 +435,38 @@ const AdminBookings = (): JSX.Element => {
     return 'pending';
   };
 
-  // Filter bookings based on status filter
+  // Filter bookings based on status + search
   const filteredBookings = useMemo(() => {
-    if (statusFilter === "all") {
-      return bookings;
-    }
+    const norm = (v: any) => (v ?? '').toString().toLowerCase();
+    const q = norm(searchQuery);
+    const d = (searchDate || '').trim();
+
     return bookings.filter((booking) => {
-      const bookingStatus = getBookingStatus(booking);
-      return bookingStatus === statusFilter;
+      // status
+      if (statusFilter !== "all" && getBookingStatus(booking) !== statusFilter) return false;
+
+      // search text across property name, customer name, booking id
+      if (q) {
+        const bookingId = (booking.id || booking._id || '').toString();
+        const propertyName = (booking.property_name ||
+          (typeof booking.property === 'object' ? booking.property?.name : '') || '').toString();
+        const customerName = (booking.customer_name ||
+          (typeof booking.customer === 'object' ? booking.customer?.name : '') || '').toString();
+        const haystack = `${propertyName} ${customerName} ${bookingId}`.toLowerCase();
+        if (!haystack.includes(q)) return false;
+      }
+
+      // search by check-in date (YYYY-MM-DD)
+      if (d) {
+        const inDate = booking.check_in_date ? new Date(booking.check_in_date) : null;
+        if (!inDate) return false;
+        const inStr = inDate.toISOString().slice(0, 10);
+        if (inStr !== d) return false;
+      }
+
+      return true;
     });
-  }, [bookings, statusFilter]);
+  }, [bookings, statusFilter, searchQuery, searchDate]);
 
   // Get title based on selected filter
   const getTitle = (): string => {
@@ -325,18 +586,20 @@ const AdminBookings = (): JSX.Element => {
           </div>
         </div>
 
-        {/* Payment Details - Show for payment_verification_pending */}
-        {bookingStatus === 'payment_verification_pending' && (
+        {/* Payment Details - Show when available or status requires it */}
+        {(bookingStatus === 'payment_verification_pending' || bookingStatus === 'confirmed' || b.manual_reference || b.payment_screenshot_url) && (
           <div className="border-t pt-4">
             <h4 className="font-semibold mb-3">Payment Details</h4>
             <div className="space-y-2 text-sm">
-              <div>
-                <span className="font-medium">Transaction ID:</span>{' '}
-                <span className="font-mono text-base font-semibold text-green-700 bg-green-50 px-2 py-1 rounded">
-                  {transactionId}
-                </span>
-              </div>
-              {b.payment_screenshot_url && (
+              {transactionId && (
+                <div>
+                  <span className="font-medium">Transaction ID:</span>{' '}
+                  <span className="font-mono text-base font-semibold text-green-700 bg-green-50 px-2 py-1 rounded">
+                    {transactionId}
+                  </span>
+                </div>
+              )}
+              {(b.payment_screenshot_url) && (
                 <div>
                   <span className="font-medium mb-2 block">Payment Screenshot:</span>
                   <div className="border rounded-lg overflow-hidden max-w-md">
@@ -364,9 +627,8 @@ const AdminBookings = (): JSX.Element => {
           </div>
         )}
 
-        {/* ID Proofs - Show for approval_pending and payment_verification_pending */}
-        {(bookingStatus === 'approval_pending' || bookingStatus === 'payment_verification_pending') && 
-         b.id_proofs && Array.isArray(b.id_proofs) && b.id_proofs.length > 0 && (
+        {/* ID Proofs - Show whenever available */}
+        {b.id_proofs && Array.isArray(b.id_proofs) && b.id_proofs.length > 0 && (
           <div className="border-t pt-4">
             <h4 className="font-semibold mb-3">ID Proofs</h4>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -411,6 +673,9 @@ const AdminBookings = (): JSX.Element => {
 
         {/* Action Buttons based on status */}
         <div className="flex gap-2 pt-4 border-t">
+          <Button size="sm" variant="outline" onClick={() => openInvoice(b)}>
+            Generate Invoice
+          </Button>
           {bookingStatus === 'approval_pending' && (
             <Button size="sm" variant="outline" onClick={() => handleViewIds(b)}>
               View IDs
@@ -457,7 +722,8 @@ const AdminBookings = (): JSX.Element => {
           <CardTitle>{getTitle()}</CardTitle>
         </CardHeader>
         <CardContent>
-          <Tabs value={statusFilter} onValueChange={setStatusFilter} className="mb-4">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
+            <Tabs value={statusFilter} onValueChange={setStatusFilter} className="flex-1">
             <TabsList>
               <TabsTrigger value="all">All</TabsTrigger>
               <TabsTrigger value="approval_pending">Approval Pending</TabsTrigger>
@@ -466,7 +732,32 @@ const AdminBookings = (): JSX.Element => {
               <TabsTrigger value="confirmed">Confirmed</TabsTrigger>
               <TabsTrigger value="cancelled">Cancelled</TabsTrigger>
             </TabsList>
-          </Tabs>
+            </Tabs>
+
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search name/property/ID"
+                className="border rounded-md px-3 py-2 w-56 text-sm bg-background"
+              />
+              <input
+                type="date"
+                value={searchDate}
+                onChange={(e) => setSearchDate(e.target.value)}
+                className="border rounded-md px-3 py-2 text-sm bg-background"
+              />
+              {(searchQuery || searchDate) && (
+                <button
+                  onClick={() => { setSearchQuery(''); setSearchDate(''); }}
+                  className="text-sm px-3 py-2 border rounded-md bg-muted hover:bg-muted/80"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          </div>
           
           {isLoading ? (
             <div className="text-center py-8 text-muted-foreground">
@@ -501,7 +792,7 @@ const AdminBookings = (): JSX.Element => {
                       if (!bookingId) return null;
 
                       return (
-                        <>
+                        <React.Fragment key={bookingId}>
                           <TableRow key={bookingId}>
                             <TableCell className="font-mono text-sm">{bookingId}</TableCell>
                             <TableCell className="font-medium">{propertyName}</TableCell>
@@ -535,7 +826,7 @@ const AdminBookings = (): JSX.Element => {
                               </TableCell>
                             </TableRow>
                           )}
-                        </>
+                        </React.Fragment>
                       );
                     })}
                   </TableBody>
@@ -686,6 +977,39 @@ const AdminBookings = (): JSX.Element => {
             >
               {cancelMutation.isPending ? "Cancelling..." : "Cancel Booking"}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Invoice Dialog */}
+      <Dialog open={invoiceDialogOpen} onOpenChange={setInvoiceDialogOpen}>
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>Invoice Preview</DialogTitle>
+            <DialogDescription>Preview and download the invoice for this booking.</DialogDescription>
+          </DialogHeader>
+          <div className="h-[70vh] border rounded overflow-hidden bg-white">
+            {/* Render invoice HTML inside iframe without opening a new tab */}
+            <iframe
+              ref={invoiceFrameRef}
+              title="Invoice"
+              className="w-full h-full"
+              srcDoc={invoiceHtml}
+            />
+          </div>
+          <DialogFooter className="gap-2">
+            <Button
+              onClick={() => {
+                const frame = invoiceFrameRef.current;
+                if (frame && frame.contentWindow) {
+                  frame.contentWindow.focus();
+                  frame.contentWindow.print();
+                }
+              }}
+            >
+              Download PDF
+            </Button>
+            <Button variant="ghost" onClick={() => setInvoiceDialogOpen(false)}>Close</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

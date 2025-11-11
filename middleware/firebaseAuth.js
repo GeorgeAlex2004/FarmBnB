@@ -1,20 +1,23 @@
 const admin = require('firebase-admin');
 
-// Initialize Firebase Admin if not already initialized
-if (!admin.apps.length) {
-  const projectId = process.env.FIREBASE_PROJECT_ID;
-  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
-  let privateKey = process.env.FIREBASE_PRIVATE_KEY;
+// Detect config
+const FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID;
+const FIREBASE_CLIENT_EMAIL = process.env.FIREBASE_CLIENT_EMAIL;
+let FIREBASE_PRIVATE_KEY = process.env.FIREBASE_PRIVATE_KEY;
 
-  if (privateKey && privateKey.includes('\\n')) {
-    privateKey = privateKey.replace(/\\n/g, '\n');
-  }
+if (FIREBASE_PRIVATE_KEY && FIREBASE_PRIVATE_KEY.includes('\\n')) {
+  FIREBASE_PRIVATE_KEY = FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n');
+}
 
+const isFirebaseConfigured = Boolean(FIREBASE_PROJECT_ID && FIREBASE_CLIENT_EMAIL && FIREBASE_PRIVATE_KEY);
+
+// Initialize Firebase Admin only when fully configured
+if (isFirebaseConfigured && !admin.apps.length) {
   admin.initializeApp({
     credential: admin.credential.cert({
-      projectId,
-      clientEmail,
-      privateKey,
+      projectId: FIREBASE_PROJECT_ID,
+      clientEmail: FIREBASE_CLIENT_EMAIL,
+      privateKey: FIREBASE_PRIVATE_KEY,
     }),
   });
 }
@@ -31,10 +34,10 @@ exports.verifyFirebaseToken = async (req, res, next) => {
       return res.status(401).json({ success: false, message: 'Missing bearer token' });
     }
 
-    // Check if Firebase Admin is initialized
-    if (!admin.apps.length) {
-      console.error('Firebase Admin not initialized');
-      return res.status(500).json({ success: false, message: 'Firebase Admin not configured' });
+    // Check if Firebase Admin is configured
+    if (!isFirebaseConfigured || !admin.apps.length) {
+      console.error('Firebase Admin not configured');
+      return res.status(503).json({ success: false, message: 'Service unavailable: Firebase Admin is not configured on the server.' });
     }
 
     const decoded = await admin.auth().verifyIdToken(token);
