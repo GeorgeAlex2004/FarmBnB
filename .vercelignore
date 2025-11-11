@@ -1,34 +1,13 @@
-# Frontend-only deployment
-# Keep uploads out of the deployment
+# Backend project: keep API code. Only ignore sensitive and build-cache files.
 uploads/
 *.log
 .env
 .env.*
 .env.local
-
-# Node modules (will be installed fresh)
 node_modules/
 **/node_modules/
-
-# Build artifacts
-**/dist/
+.DS_Store
 **/.cache/
 **/.vite/
 **/.turbo/
-
-# Development files
-.DS_Store
-*.log
-# Keep markdown files; they are harmless and sometimes referenced
-
-# Keep frontend source
-!frontend/
-
-# Ignore backend/serverless code
-api/
-routes/
-middleware/
-models/
-scripts/
-utils/
-server.js
+**/dist/

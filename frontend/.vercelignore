@@ -1,0 +1,23 @@
+# Frontend-only deployment ignore list
+uploads/
+*.log
+.env
+.env.*
+.env.local
+node_modules/
+**/node_modules/
+**/dist/
+**/.cache/
+**/.vite/
+**/.turbo/
+.DS_Store
+
+# Ignore backend/serverless code for the frontend project
+api/
+routes/
+middleware/
+models/
+scripts/
+utils/
+server.js
+
