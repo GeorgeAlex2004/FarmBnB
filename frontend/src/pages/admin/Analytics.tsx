@@ -4,7 +4,7 @@ import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Building, TrendingUp, DollarSign, Calendar } from "lucide-react";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, PieChart, Pie, Cell, LineChart, Line, AreaChart, Area, Legend } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, LineChart, Line } from "recharts";
 import { format, subDays, startOfDay } from "date-fns";
 
 const Analytics = () => {
@@ -170,29 +170,6 @@ const Analytics = () => {
       .slice(0, 10); // Top 10 properties
   }, [propertyAnalytics]);
 
-  const bookingStatusData = useMemo(() => {
-    const statusCounts = new Map<string, number>();
-    deduplicatedBookings.forEach((booking: any) => {
-      const status = (booking.status || 'pending').toLowerCase();
-      statusCounts.set(status, (statusCounts.get(status) || 0) + 1);
-    });
-    
-    const colors = {
-      confirmed: '#22c55e',
-      completed: '#3b82f6',
-      pending: '#f59e0b',
-      cancelled: '#ef4444',
-      'approval_pending': '#f59e0b',
-      'payment_pending': '#f59e0b',
-    };
-
-    return Array.from(statusCounts.entries()).map(([status, count]) => ({
-      name: status.charAt(0).toUpperCase() + status.slice(1).replace('_', ' '),
-      value: count,
-      color: colors[status as keyof typeof colors] || '#6b7280',
-    }));
-  }, [deduplicatedBookings]);
-
   const revenueOverTimeData = useMemo(() => {
     const last30Days = Array.from({ length: 30 }, (_, i) => {
       const date = subDays(new Date(), 29 - i);
@@ -218,60 +195,10 @@ const Analytics = () => {
     return last30Days;
   }, [deduplicatedBookings]);
 
-  const bookingsOverTimeData = useMemo(() => {
-    const last30Days = Array.from({ length: 30 }, (_, i) => {
-      const date = subDays(new Date(), 29 - i);
-      return {
-        date: format(date, 'MMM dd'),
-        bookings: 0,
-        confirmed: 0,
-      };
-    });
-
-    deduplicatedBookings.forEach((booking: any) => {
-      const bookingDate = new Date(booking.created_at || booking.createdAt || Date.now());
-      const dateKey = format(startOfDay(bookingDate), 'MMM dd');
-      const status = (booking.status || '').toLowerCase();
-      
-      const dayData = last30Days.find(d => d.date === dateKey);
-      if (dayData) {
-        dayData.bookings++;
-        if (['confirmed', 'completed'].includes(status)) {
-          dayData.confirmed++;
-        }
-      }
-    });
-
-    return last30Days;
-  }, [deduplicatedBookings]);
-
-  const propertyComparisonData = useMemo(() => {
-    return propertyAnalytics
-      .slice(0, 5) // Top 5 properties
-      .map(stat => ({
-        name: (stat.property?.name || 'Unknown').substring(0, 15) + (stat.property?.name?.length > 15 ? '...' : ''),
-        revenue: stat.totalRevenue,
-        bookings: stat.totalBookings,
-        nights: stat.totalNights,
-      }));
-  }, [propertyAnalytics]);
-
   const chartConfig = {
     revenue: {
       label: "Revenue",
       color: "hsl(var(--chart-1))",
-    },
-    bookings: {
-      label: "Bookings",
-      color: "hsl(var(--chart-2))",
-    },
-    confirmed: {
-      label: "Confirmed",
-      color: "hsl(var(--chart-3))",
-    },
-    nights: {
-      label: "Nights",
-      color: "hsl(var(--chart-4))",
     },
   };
 
@@ -377,150 +304,43 @@ const Analytics = () => {
           </CardContent>
         </Card>
 
-        {/* Booking Status Distribution */}
+        {/* Revenue Over Time */}
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-lg">Booking Status Distribution</CardTitle>
+            <CardTitle className="text-lg">Revenue Over Time (Last 30 Days)</CardTitle>
           </CardHeader>
           <CardContent>
-            {bookingStatusData.length > 0 ? (
+            {revenueOverTimeData.some(d => d.revenue > 0) ? (
               <ChartContainer config={chartConfig} className="h-[250px]">
-                <PieChart>
-                  <Pie
-                    data={bookingStatusData}
-                    cx="50%"
-                    cy="50%"
-                    labelLine={false}
-                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                    outerRadius={70}
-                    fill="#8884d8"
-                    dataKey="value"
-                  >
-                    {bookingStatusData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <ChartTooltip content={<ChartTooltipContent />} />
-                </PieChart>
+                <LineChart data={revenueOverTimeData}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="date" fontSize={10} />
+                  <YAxis 
+                    tickFormatter={(value) => `₹${(value / 1000).toFixed(0)}k`}
+                    fontSize={10}
+                    width={50}
+                  />
+                  <ChartTooltip 
+                    content={<ChartTooltipContent formatter={(value) => formatCurrency(Number(value))} />} 
+                  />
+                  <Line 
+                    type="monotone" 
+                    dataKey="revenue" 
+                    stroke="var(--color-revenue)" 
+                    strokeWidth={2}
+                    dot={{ r: 3 }}
+                    activeDot={{ r: 5 }}
+                  />
+                </LineChart>
               </ChartContainer>
             ) : (
               <div className="flex items-center justify-center h-[250px] text-muted-foreground text-sm">
-                No booking data available
+                No revenue data for the last 30 days
               </div>
             )}
           </CardContent>
         </Card>
       </div>
-
-      {/* Revenue Over Time */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg">Revenue Over Time (Last 30 Days)</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {revenueOverTimeData.some(d => d.revenue > 0) ? (
-            <ChartContainer config={chartConfig} className="h-[250px]">
-              <LineChart data={revenueOverTimeData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="date" fontSize={10} />
-                <YAxis 
-                  tickFormatter={(value) => `₹${(value / 1000).toFixed(0)}k`}
-                  fontSize={10}
-                  width={50}
-                />
-                <ChartTooltip 
-                  content={<ChartTooltipContent formatter={(value) => formatCurrency(Number(value))} />} 
-                />
-                <Line 
-                  type="monotone" 
-                  dataKey="revenue" 
-                  stroke="var(--color-revenue)" 
-                  strokeWidth={2}
-                  dot={{ r: 3 }}
-                  activeDot={{ r: 5 }}
-                />
-              </LineChart>
-            </ChartContainer>
-          ) : (
-            <div className="flex items-center justify-center h-[250px] text-muted-foreground text-sm">
-              No revenue data for the last 30 days
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Bookings Over Time */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg">Bookings Over Time (Last 30 Days)</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {bookingsOverTimeData.some(d => d.bookings > 0) ? (
-            <ChartContainer config={chartConfig} className="h-[250px]">
-              <AreaChart data={bookingsOverTimeData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="date" fontSize={10} />
-                <YAxis fontSize={10} width={40} />
-                <ChartTooltip content={<ChartTooltipContent />} />
-                <Area 
-                  type="monotone" 
-                  dataKey="bookings" 
-                  stackId="1"
-                  stroke="var(--color-bookings)" 
-                  fill="var(--color-bookings)"
-                  fillOpacity={0.6}
-                />
-                <Area 
-                  type="monotone" 
-                  dataKey="confirmed" 
-                  stackId="2"
-                  stroke="var(--color-confirmed)" 
-                  fill="var(--color-confirmed)"
-                  fillOpacity={0.6}
-                />
-                <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
-              </AreaChart>
-            </ChartContainer>
-          ) : (
-            <div className="flex items-center justify-center h-[250px] text-muted-foreground text-sm">
-              No booking data for the last 30 days
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Property Performance Comparison */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg">Top Properties Performance Comparison</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {propertyComparisonData.length > 0 ? (
-            <ChartContainer config={chartConfig} className="h-[250px]">
-              <BarChart data={propertyComparisonData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis 
-                  dataKey="name" 
-                  angle={-45}
-                  textAnchor="end"
-                  height={60}
-                  fontSize={10}
-                />
-                <YAxis fontSize={10} width={40} />
-                <ChartTooltip content={<ChartTooltipContent />} />
-                <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
-                <Bar dataKey="revenue" fill="var(--color-revenue)" name="Revenue (₹)" />
-                <Bar dataKey="bookings" fill="var(--color-bookings)" name="Bookings" />
-                <Bar dataKey="nights" fill="var(--color-nights)" name="Nights" />
-              </BarChart>
-            </ChartContainer>
-          ) : (
-            <div className="flex items-center justify-center h-[250px] text-muted-foreground text-sm">
-              No property data available
-            </div>
-          )}
-        </CardContent>
-      </Card>
 
       {/* Property Performance Table */}
       <Card>

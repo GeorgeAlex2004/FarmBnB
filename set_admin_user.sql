@@ -13,7 +13,7 @@
 
 -- Replace 'YOUR_USER_UUID_HERE' with your actual user UUID
 INSERT INTO public.user_roles (user_id, role)
-VALUES ('89e3a7f4-aa6e-46a4-a052-9f730d952ff8', 'admin')
+VALUES ('0f7c0feb-9e35-4d70-aad9-09f7e78c72e4', 'admin')
 ON CONFLICT (user_id, role) DO NOTHING;
 
 -- Verify the admin role was added
