@@ -2,12 +2,15 @@
 
 This is the frontend application for FarmBnB, an AirBnB-like property booking platform.
 
+**Note**: This is a frontend-only application using Supabase for backend services. No separate backend server is required.
+
 ## 🚀 Getting Started
 
 ### Prerequisites
 
 - Node.js 18+ 
 - npm or yarn
+- A Supabase project (sign up at https://supabase.com)
 
 ### Installation
 
@@ -23,8 +26,13 @@ cp .env.example .env
 
 3. Configure your environment variables:
 ```env
-VITE_API_URL=http://localhost:5000/api
-VITE_STRIPE_PUBLISHABLE_KEY=pk_test_your_key_here
+# Required - Get these from Supabase project settings
+VITE_SUPABASE_URL=https://your-project.supabase.co
+VITE_SUPABASE_PUBLISHABLE_KEY=your-anon-key-here
+
+# Optional - For UPI payments
+VITE_UPI_ID=your-upi-id@paytm
+VITE_UPI_QR_CODE_URL=https://your-qr-code-url.com/qr.png
 ```
 
 ### Development
@@ -42,6 +50,29 @@ Build for production:
 ```bash
 npm run build
 ```
+
+The built files will be in the `dist` directory.
+
+## 📦 Deployment
+
+### Vercel Deployment
+
+This project is configured for easy deployment to Vercel. See [VERCEL_DEPLOYMENT.md](../VERCEL_DEPLOYMENT.md) for detailed instructions.
+
+Quick steps:
+1. Push your code to GitHub/GitLab/Bitbucket
+2. Import the repository in Vercel
+3. Set root directory to `frontend`
+4. Add environment variables in Vercel dashboard
+5. Deploy!
+
+### Other Platforms
+
+This is a standard Vite + React application and can be deployed to:
+- **Netlify**: Use the Vite build preset
+- **Cloudflare Pages**: Use the Vite build preset
+- **AWS Amplify**: Configure build settings for Vite
+- **Any static hosting**: Build with `npm run build` and serve the `dist` folder
 
 ## 📁 Project Structure
 
@@ -77,30 +108,15 @@ src/
 - ✅ Responsive design
 - ✅ Modern UI with animations
 
-## 🔌 API Integration
+## 🔌 Supabase Integration
 
-The frontend uses a REST API client (`src/lib/api.ts`) that communicates with the backend Express server.
+The frontend uses Supabase directly for all backend operations:
+- **Authentication**: Supabase Auth (email/password)
+- **Database**: PostgreSQL via Supabase
+- **Storage**: Supabase Storage for images
+- **Security**: Row Level Security (RLS) policies
 
-### Authentication
-
-- Login: `POST /api/auth/login`
-- Register: `POST /api/auth/register`
-- Get current user: `GET /api/auth/me`
-
-### Properties
-
-- List: `GET /api/properties`
-- Get one: `GET /api/properties/:id`
-- Create: `POST /api/properties` (Admin)
-- Update: `PUT /api/properties/:id` (Admin)
-- Delete: `DELETE /api/properties/:id` (Admin)
-
-### Bookings
-
-- List: `GET /api/bookings`
-- Create: `POST /api/bookings`
-- Confirm: `PUT /api/bookings/:id/confirm` (Admin)
-- Cancel: `PUT /api/bookings/:id/cancel`
+All API calls are made directly to Supabase using the `@supabase/supabase-js` client library. No separate backend server is required.
 
 ## 🎨 Styling
 
@@ -111,8 +127,14 @@ The frontend uses a REST API client (`src/lib/api.ts`) that communicates with th
 
 ## 📝 Environment Variables
 
-- `VITE_API_URL` - Backend API URL
-- `VITE_STRIPE_PUBLISHABLE_KEY` - Stripe publishable key for payments
+### Required:
+- `VITE_SUPABASE_URL` - Your Supabase project URL
+- `VITE_SUPABASE_PUBLISHABLE_KEY` - Your Supabase anon/public key
+
+### Optional:
+- `VITE_UPI_ID` - Your UPI ID for payments (e.g., `your-phone@paytm`)
+- `VITE_UPI_QR_CODE_URL` - URL to your UPI QR code image
+- `VITE_BASE_PATH` - Base path if deploying to a subdirectory (default: `/`)
 
 ## 🛠️ Tech Stack
 

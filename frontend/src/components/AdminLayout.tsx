@@ -5,6 +5,8 @@ import {
   LayoutDashboard,
   Building,
   Calendar,
+  CalendarDays,
+  BarChart3,
   LogOut,
   Menu,
   X,
@@ -41,6 +43,8 @@ export const AdminLayout = () => {
     { icon: LayoutDashboard, label: "Dashboard", path: "/admin/dashboard" },
     { icon: Building, label: "Properties", path: "/admin/properties" },
     { icon: Calendar, label: "Bookings", path: "/admin/bookings" },
+    { icon: CalendarDays, label: "Calendar View", path: "/admin/calendar" },
+    { icon: BarChart3, label: "Analytics", path: "/admin/analytics" },
   ];
 
   return (

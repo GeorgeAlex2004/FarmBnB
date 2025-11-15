@@ -14,6 +14,8 @@ import AdminDashboard from "./pages/admin/Dashboard";
 import AdminProperties from "./pages/admin/Properties";
 import PropertyForm from "./pages/admin/PropertyForm";
 import AdminBookings from "./pages/admin/Bookings";
+import CalendarView from "./pages/admin/CalendarView";
+import Analytics from "./pages/admin/Analytics";
 import NotFound from "./pages/NotFound";
 import Profile from "./pages/Profile";
 import PaymentPage from "./pages/Payment";
@@ -51,6 +53,8 @@ const App = () => (
               <Route path="properties/new" element={<PropertyForm />} />
               <Route path="properties/edit/:id" element={<PropertyForm />} />
               <Route path="bookings" element={<AdminBookings />} />
+              <Route path="calendar" element={<CalendarView />} />
+              <Route path="analytics" element={<Analytics />} />
             </Route>
 
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}

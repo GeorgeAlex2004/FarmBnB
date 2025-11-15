@@ -7,9 +7,14 @@ import { Navbar } from "@/components/Navbar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
-import { MapPin, Users, Calendar, ChevronLeft, ChevronRight, Wifi, Car, UtensilsCrossed, Waves, Dog, Snowflake, Flame } from "lucide-react";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { MapPin, Users, Calendar as CalendarIcon, ChevronLeft, ChevronRight, Wifi, Car, UtensilsCrossed, Waves, Dog, Snowflake, Flame } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
+import { format } from "date-fns";
+import { DateRange } from "react-day-picker";
+import { supabase } from "@/integrations/supabase/client";
 
 const facilityIcons: Record<string, any> = {
   'WiFi': Wifi,
@@ -26,11 +31,12 @@ const PropertyDetails = () => {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
-  const [bookingDate, setBookingDate] = useState("");
+  const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
   const [numGuests, setNumGuests] = useState(2);
   const [foodRequired, setFoodRequired] = useState<boolean | null>(null);
   const [foodPreference, setFoodPreference] = useState<'veg' | 'non-veg' | 'both' | ''>('');
   const [allergies, setAllergies] = useState('');
+  const [unavailableDates, setUnavailableDates] = useState<Date[]>([]);
 
   const { data: propertyResponse, isLoading } = useQuery({
     queryKey: ["property", id],
@@ -52,29 +58,174 @@ const PropertyDetails = () => {
     ...videos.map((u: string) => ({ type: 'video' as const, url: u })),
   ];
 
-  // Check availability when dates change
-  const { data: availabilityCheck } = useQuery({
-    queryKey: ["availability", id, bookingDate],
+  // Fetch unavailable dates (bookings + blackouts) for calendar
+  const { data: unavailableDatesData } = useQuery({
+    queryKey: ["unavailable-dates", id],
     queryFn: async () => {
-      if (!id || !bookingDate) return null;
-      const response = await api.checkAvailability(id, bookingDate, bookingDate);
+      if (!id) return { bookings: [], blackouts: [] };
+      
+      // Fetch ALL bookings for this property (we'll filter blocking bookings in JS)
+      const { data: allBookings, error: bookingsError } = await supabase
+        .from('bookings')
+        .select('check_in_date, check_out_date, status, verification_status, payment_screenshot_url, manual_reference, advance_paid, property_id')
+        .eq('property_id', id);
+      
+      if (bookingsError) {
+        console.error('Error fetching bookings:', bookingsError);
+      }
+      
+      // Filter to bookings that should block dates:
+      // 1. Status is explicitly 'confirmed', OR
+      // 2. Verification is approved AND payment has been made (payment_screenshot_url, manual_reference, or advance_paid > 0)
+      // This prevents double-booking once customer has paid, even if admin hasn't explicitly confirmed yet
+      const blockingBookings = (allBookings || []).filter((b: any) => {
+        const status = (b.status || '').toLowerCase();
+        const verificationStatus = (b.verification_status || 'pending').toLowerCase();
+        
+        // Explicitly confirmed
+        if (status === 'confirmed') {
+          return true;
+        }
+        
+        // Verification approved AND payment made
+        if (verificationStatus === 'approved') {
+          const hasPayment = 
+            b.payment_screenshot_url || 
+            b.manual_reference || 
+            (b.advance_paid && Number(b.advance_paid) > 0);
+          return hasPayment;
+        }
+        
+        return false;
+      });
+      
+      console.log('Fetched bookings for property', id, ':', {
+        total: allBookings?.length || 0,
+        blocking: blockingBookings.length,
+        allStatuses: allBookings?.map((b: any) => ({ 
+          status: b.status, 
+          verification_status: b.verification_status,
+          hasPayment: !!(b.payment_screenshot_url || b.manual_reference || (b.advance_paid && Number(b.advance_paid) > 0)),
+          checkIn: b.check_in_date, 
+          checkOut: b.check_out_date 
+        })) || []
+      });
+      
+      // Fetch blackout dates
+      const { data: blackouts, error: blackoutsError } = await (supabase as any)
+        .from('property_blackouts')
+        .select('date')
+        .eq('property_id', id);
+      
+      if (blackoutsError) {
+        console.error('Error fetching blackouts:', blackoutsError);
+      }
+      
+      console.log('Fetched unavailable dates:', { 
+        bookings: blockingBookings.length, 
+        blackouts: blackouts?.length || 0
+      });
+      
+      return { 
+        bookings: blockingBookings, 
+        blackouts: blackouts || [] 
+      };
+    },
+    enabled: !!id,
+  });
+
+  // Process unavailable dates into Date objects (normalized to midnight local time)
+  useEffect(() => {
+    if (!unavailableDatesData) return;
+    
+    const dates: Date[] = [];
+    
+    // Helper to normalize date to midnight local time for consistent comparison
+    const normalizeDate = (date: Date): Date => {
+      const normalized = new Date(date);
+      normalized.setHours(0, 0, 0, 0);
+      return normalized;
+    };
+    
+    // Add blackout dates
+    unavailableDatesData.blackouts.forEach((blackout: any) => {
+      const date = new Date(blackout.date + 'T00:00:00'); // Ensure we parse as date-only
+      if (!isNaN(date.getTime())) {
+        dates.push(normalizeDate(date));
+      }
+    });
+    
+    // Add booking date ranges
+    unavailableDatesData.bookings.forEach((booking: any) => {
+      const checkIn = new Date(booking.check_in_date + 'T00:00:00');
+      const checkOut = new Date(booking.check_out_date + 'T00:00:00');
+      
+      if (!isNaN(checkIn.getTime()) && !isNaN(checkOut.getTime())) {
+        // Normalize dates
+        const normalizedCheckIn = normalizeDate(checkIn);
+        const normalizedCheckOut = normalizeDate(checkOut);
+        
+        // Add all dates in the range
+        const current = new Date(normalizedCheckIn);
+        while (current <= normalizedCheckOut) {
+          dates.push(new Date(current));
+          current.setDate(current.getDate() + 1);
+        }
+      }
+    });
+    
+    // Remove duplicates by comparing date strings
+    const uniqueDates = Array.from(
+      new Map(
+        dates.map(d => {
+          const normalized = new Date(d);
+          normalized.setHours(0, 0, 0, 0);
+          return [normalized.getTime(), normalized];
+        })
+      ).values()
+    );
+    
+    setUnavailableDates(uniqueDates);
+    
+    // Debug: Log unavailable dates
+    if (uniqueDates.length > 0) {
+      console.log('Unavailable dates set:', uniqueDates.map(d => format(d, 'yyyy-MM-dd')));
+    }
+  }, [unavailableDatesData]);
+
+  // Check availability when dates change
+  const checkInDate = dateRange?.from ? format(dateRange.from, 'yyyy-MM-dd') : '';
+  const checkOutDate = dateRange?.to ? format(dateRange.to, 'yyyy-MM-dd') : checkInDate;
+  
+  const { data: availabilityCheck } = useQuery({
+    queryKey: ["availability", id, checkInDate, checkOutDate],
+    queryFn: async () => {
+      if (!id || !checkInDate) return null;
+      const response = await api.checkAvailability(id, checkInDate, checkOutDate);
       return response;
     },
-    enabled: !!id && !!bookingDate,
+    enabled: !!id && !!checkInDate,
   });
 
   const calculateTotal = () => {
-    if (!property || !bookingDate) return 0;
-    const nights = 1; // Full-day booking with fixed times
+    if (!property || !dateRange?.from) return 0;
+    
+    // Calculate number of nights
+    const checkIn = dateRange.from;
+    const checkOut = dateRange.to || dateRange.from;
+    const nights = Math.max(1, Math.ceil((checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60 * 24)) + 1);
 
-    const basePrice = Number(property.pricing?.basePrice ?? property.basePricePerNight ?? property.base_price_per_night ?? 0);
-    const perHeadPrice = Number(property.pricing?.perHeadPrice ?? property.perHeadCharge ?? property.per_head_charge ?? 0);
-    const cleaningFee = Number(property.pricing?.extraFees?.cleaningFee ?? property.cleaningFee ?? 0);
-    const serviceFee = Number(property.pricing?.extraFees?.serviceFee ?? property.serviceFee ?? 0);
+    const basePrice = Number(property.pricing?.basePrice ?? property.base_price_per_night ?? 0);
+    const perHeadPrice = Number(property.pricing?.perHeadPrice ?? property.per_head_charge ?? 0);
+    const cleaningFee = Number(property.pricing?.extraFees?.cleaningFee ?? property.cleaning_fee ?? 0);
+    const serviceFee = Number(property.pricing?.extraFees?.serviceFee ?? property.service_fee ?? 0);
 
     const baseAmount = basePrice * nights;
-    const guestCharges = perHeadPrice * Number(numGuests) * nights;
-    const foodCharges = foodRequired ? 500 * Number(numGuests) * nights : 0;
+    // Guest charges only apply for guests beyond 2 (base covers first 2 guests)
+    const numberOfGuests = Number(numGuests);
+    const additionalGuests = Math.max(0, numberOfGuests - 2);
+    const guestCharges = perHeadPrice * additionalGuests * nights;
+    const foodCharges = foodRequired ? 500 * numberOfGuests * nights : 0;
     const extraFees = cleaningFee + serviceFee;
 
     return baseAmount + guestCharges + foodCharges + extraFees;
@@ -85,7 +236,7 @@ const PropertyDetails = () => {
       return api.createBooking(data);
     },
     onSuccess: (response) => {
-      const bookingId = response.data._id || response.data.id;
+      const bookingId = response.data.id;
       toast.success("Booking created. Upload ID Proofs to proceed.");
       setTimeout(() => {
         navigate(`/bookings/${bookingId}/id-proof`);
@@ -96,74 +247,105 @@ const PropertyDetails = () => {
     },
   });
 
+  const [isBookingInProgress, setIsBookingInProgress] = useState(false);
+
   const handleBooking = async () => {
-    if (!isAuthenticated) {
-      toast.error("Please login to book a property");
-      navigate("/login");
+    // Prevent multiple simultaneous bookings
+    if (isBookingInProgress || createBookingMutation.isPending) {
       return;
     }
-
-    // Check if phone number is provided (verification is optional due to Firebase billing)
+    
+    setIsBookingInProgress(true);
+    
     try {
-      const profileRes = await api.getProfile();
-      const profile = profileRes.data;
-      const hasPhone = profile?.phone && profile.phone.length > 0;
-      
-      if (!hasPhone) {
-        toast.error("Phone number required. Please add your phone number in your profile before booking.");
-        navigate("/profile");
+      if (!isAuthenticated) {
+        toast.error("Please login to book a property");
+        navigate("/login");
+        setIsBookingInProgress(false);
         return;
       }
-    } catch (err) {
-      // If profile fetch fails, backend will catch it anyway
-      console.error("Error checking phone:", err);
-    }
 
-    if (!bookingDate) {
-      toast.error("Please select a date");
-      return;
-    }
+      // Check if phone number is provided
+      try {
+        const profileRes = await api.getProfile();
+        const profile = profileRes.data;
+        const hasPhone = profile?.phone && profile.phone.length > 0;
+        
+        if (!hasPhone) {
+          toast.error("Phone number required. Please add your phone number in your profile before booking.");
+          navigate("/profile");
+          setIsBookingInProgress(false);
+          return;
+        }
+      } catch (err) {
+        // If profile fetch fails, backend will catch it anyway
+        console.error("Error checking phone:", err);
+      }
 
-    // Enforce same-day bookings (no overnight stays)
-    // Always same-day booking; backend enforces as well
+      if (!dateRange?.from) {
+        toast.error("Please select check-in date");
+        setIsBookingInProgress(false);
+        return;
+      }
+      
+      if (!dateRange.to) {
+        toast.error("Please select check-out date");
+        setIsBookingInProgress(false);
+        return;
+      }
 
-    if (availabilityCheck && !availabilityCheck.available) {
-      toast.error(availabilityCheck.reason || "Property not available for these dates");
-      return;
-    }
+      if (availabilityCheck && !availabilityCheck.available) {
+        toast.error(availabilityCheck.reason || "Property not available for these dates");
+        setIsBookingInProgress(false);
+        return;
+      }
 
-    const maxGuests = property.capacity?.maxGuests || property.maxGuests;
-    if (numGuests > maxGuests) {
-      toast.error(`Maximum ${maxGuests} guests allowed`);
-      return;
-    }
+      const maxGuests = property.capacity?.maxGuests || property.max_guests || 1;
+      if (numGuests > maxGuests) {
+        toast.error(`Maximum ${maxGuests} guests allowed`);
+        setIsBookingInProgress(false);
+        return;
+      }
 
-    const total = calculateTotal();
-    if (total <= 0) {
-      toast.error("Invalid booking dates");
-      return;
-    }
+      const total = calculateTotal();
+      if (total <= 0) {
+        toast.error("Invalid booking dates");
+        setIsBookingInProgress(false);
+        return;
+      }
 
-    // Require food selection
-    if (foodRequired === null) {
-      toast.error('Please specify if you require food.');
-      return;
-    }
-    if (foodRequired && !foodPreference) {
-      toast.error('Please choose veg / non-veg / both.');
-      return;
-    }
+      // Require food selection
+      if (foodRequired === null) {
+        toast.error('Please specify if you require food.');
+        setIsBookingInProgress(false);
+        return;
+      }
+      if (foodRequired && !foodPreference) {
+        toast.error('Please choose veg / non-veg / both.');
+        setIsBookingInProgress(false);
+        return;
+      }
 
+      const checkIn = format(dateRange.from, 'yyyy-MM-dd');
+      const checkOut = format(dateRange.to, 'yyyy-MM-dd');
+    
     createBookingMutation.mutate({
       property: id,
-      checkIn: bookingDate,
-      checkOut: bookingDate,
+      checkIn,
+      checkOut,
       numberOfGuests: numGuests,
       foodRequired,
       foodPreference: foodPreference || undefined,
       allergies: allergies || undefined,
       specialRequests: `Outside food not allowed. Food ${foodRequired ? `required (${foodPreference})` : 'not required'}${allergies ? `; allergies: ${allergies}` : ''}`,
+    }, {
+      onSettled: () => {
+        setIsBookingInProgress(false);
+      }
     });
+    } catch (error) {
+      setIsBookingInProgress(false);
+    }
   };
 
   if (isLoading) {
@@ -193,13 +375,15 @@ const PropertyDetails = () => {
   }
 
   const total = calculateTotal();
-  const basePrice = property.pricing?.basePrice || property.basePricePerNight || property.base_price_per_night || 0;
-  const perHeadPrice = property.pricing?.perHeadPrice || property.perHeadCharge || property.per_head_charge || 0;
-  const cleaningFee = property.pricing?.extraFees?.cleaningFee || property.cleaningFee || 0;
-  const serviceFee = property.pricing?.extraFees?.serviceFee || property.serviceFee || 0;
-  const maxGuests = property.capacity?.maxGuests || property.maxGuests || property.max_guests || 1;
+  const basePrice = property.pricing?.basePrice || property.base_price_per_night || 0;
+  const perHeadPrice = property.pricing?.perHeadPrice || property.per_head_charge || 0;
+  const cleaningFee = property.pricing?.extraFees?.cleaningFee || property.cleaning_fee || 0;
+  const serviceFee = property.pricing?.extraFees?.serviceFee || property.service_fee || 0;
+  const maxGuests = property.capacity?.maxGuests || property.max_guests || 1;
 
-  const nights = bookingDate ? 1 : 0;
+  const nights = dateRange?.from && dateRange?.to 
+    ? Math.max(1, Math.ceil((dateRange.to.getTime() - dateRange.from.getTime()) / (1000 * 60 * 60 * 24)) + 1)
+    : 0;
 
   const nextImage = () => {
     if (media.length === 0) return;
@@ -288,9 +472,11 @@ const PropertyDetails = () => {
               <div className="flex items-center gap-2 text-muted-foreground">
                 <MapPin className="h-5 w-5" />
                 <span>
-                  {property.location?.address || property.location || 'Location'}
-                  {property.location?.city && `, ${property.location.city}`}
-                  {property.location?.state && `, ${property.location.state}`}
+                  {typeof property.location === 'string' 
+                    ? property.location 
+                    : property.location?.address || 'Location'}
+                  {typeof property.location === 'object' && property.location?.city && `, ${property.location.city}`}
+                  {typeof property.location === 'object' && property.location?.state && `, ${property.location.state}`}
                 </span>
               </div>
             </div>
@@ -303,8 +489,8 @@ const PropertyDetails = () => {
                 </p>
                 <div className="mt-4 p-3 rounded-lg bg-amber-50 text-amber-900 text-sm border border-amber-200">
                   <ul className="list-disc pl-5 space-y-1">
-                    <li><strong>No overnight stay:</strong> Same-day check-in and check-out only.</li>
                     <li><strong>Check-in:</strong> 9:00 AM &nbsp; <strong>Check-out:</strong> 7:00 PM</li>
+                    <li><strong>Multi-day bookings:</strong> You can book for multiple consecutive days.</li>
                     <li><strong>Outside food not allowed.</strong></li>
                   </ul>
                 </div>
@@ -346,7 +532,7 @@ const PropertyDetails = () => {
                   <p className="text-sm text-muted-foreground">per day</p>
                   {perHeadPrice > 0 && (
                     <p className="text-sm text-muted-foreground mt-1">
-                      + {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(perHeadPrice)} per guest per day
+                      Base covers up to 2 guests. Additional guests: {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(perHeadPrice)} per guest per day
                     </p>
                   )}
                 </div>
@@ -354,16 +540,71 @@ const PropertyDetails = () => {
                 <div className="space-y-3">
                   <div>
                     <label className="text-sm font-medium mb-1 block">
-                      Select date
+                      Select dates
                     </label>
-                    <Input
-                      type="date"
-                      value={bookingDate}
-                      onChange={(e) => setBookingDate(e.target.value)}
-                      min={new Date().toISOString().split("T")[0]}
-                      className="border-2"
-                    />
-                    <p className="text-xs text-muted-foreground mt-1">Full-day booking. Check-in 9:00 AM, Check-out 7:00 PM.</p>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          className="w-full justify-start text-left font-normal border-2"
+                        >
+                          <CalendarIcon className="mr-2 h-4 w-4" />
+                          {dateRange?.from ? (
+                            dateRange.to ? (
+                              <>
+                                {format(dateRange.from, "dd-MM-yyyy")} -{" "}
+                                {format(dateRange.to, "dd-MM-yyyy")}
+                              </>
+                            ) : (
+                              format(dateRange.from, "dd-MM-yyyy")
+                            )
+                          ) : (
+                            <span>Pick a date range</span>
+                          )}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0" align="start">
+                        <Calendar
+                          mode="range"
+                          defaultMonth={dateRange?.from}
+                          selected={dateRange}
+                          onSelect={setDateRange}
+                          numberOfMonths={2}
+                          disabled={(date) => {
+                            // Disable past dates
+                            const today = new Date();
+                            today.setHours(0, 0, 0, 0);
+                            const dateNormalized = new Date(date);
+                            dateNormalized.setHours(0, 0, 0, 0);
+                            if (dateNormalized < today) return true;
+                            
+                            // Disable unavailable dates - compare by timestamp for accuracy
+                            return unavailableDates.some(
+                              (unavailable) => {
+                                const unavailableNormalized = new Date(unavailable);
+                                unavailableNormalized.setHours(0, 0, 0, 0);
+                                return unavailableNormalized.getTime() === dateNormalized.getTime();
+                              }
+                            );
+                          }}
+                          modifiers={{
+                            unavailable: unavailableDates,
+                          }}
+                          modifiersClassNames={{
+                            unavailable: "bg-red-100 text-red-700 hover:bg-red-200 font-semibold border border-red-300 cursor-not-allowed",
+                          }}
+                          className="rounded-md border"
+                        />
+                      </PopoverContent>
+                    </Popover>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Full-day booking. Check-in 9:00 AM, Check-out 7:00 PM.
+                      {unavailableDates.length > 0 && (
+                        <span className="text-destructive ml-1">
+                          Unavailable dates are disabled
+                        </span>
+                      )}
+                    </p>
                   </div>
 
                   <div>
@@ -428,27 +669,32 @@ const PropertyDetails = () => {
                   </div>
                 )}
 
-                {bookingDate && total > 0 && (
+                {dateRange?.from && dateRange?.to && total > 0 && (
                   <div className="space-y-2 pt-4 border-t">
                     <div className="flex justify-between text-sm">
-                      <span>Base amount (1 day)</span>
+                      <span>Base amount ({nights} {nights === 1 ? 'day' : 'days'})</span>
                       <span>
-                        {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(basePrice)}
+                        {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(basePrice * nights)}
                       </span>
                     </div>
-                    {perHeadPrice > 0 && (
-                      <div className="flex justify-between text-sm">
-                        <span>Guest charges ({numGuests} guests × 1 day)</span>
-                        <span>
-                          {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(perHeadPrice * numGuests)}
-                        </span>
-                      </div>
-                    )}
+                    {(() => {
+                      const numberOfGuests = Number(numGuests);
+                      const additionalGuests = Math.max(0, numberOfGuests - 2);
+                      const guestCharges = perHeadPrice * additionalGuests * nights;
+                      return guestCharges > 0 && (
+                        <div className="flex justify-between text-sm">
+                          <span>Guest charges ({additionalGuests} additional {additionalGuests === 1 ? 'guest' : 'guests'} × ₹{perHeadPrice.toLocaleString('en-IN')} × {nights} {nights === 1 ? 'day' : 'days'})</span>
+                          <span>
+                            {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(guestCharges)}
+                          </span>
+                        </div>
+                      );
+                    })()}
                     {foodRequired && (
                       <div className="flex justify-between text-sm">
-                        <span>Food charges ({numGuests} guests × 1 day)</span>
+                        <span>Food charges ({numGuests} guests × {nights} {nights === 1 ? 'day' : 'days'})</span>
                         <span>
-                          {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(500 * numGuests)}
+                          {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(500 * numGuests * nights)}
                         </span>
                       </div>
                     )}
@@ -477,7 +723,7 @@ const PropertyDetails = () => {
                   className="w-full"
                   size="lg"
                   onClick={handleBooking}
-                  disabled={!bookingDate || total <= 0 || (availabilityCheck && !availabilityCheck.available) || createBookingMutation.isPending}
+                  disabled={!dateRange?.from || !dateRange?.to || total <= 0 || (availabilityCheck && !availabilityCheck.available) || createBookingMutation.isPending || isBookingInProgress}
                 >
                   {createBookingMutation.isPending ? "Processing..." : "Book Now"}
                 </Button>

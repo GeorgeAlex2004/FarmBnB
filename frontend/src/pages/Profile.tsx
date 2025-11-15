@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import api from "@/lib/api";
-import { getAuth, updateProfile } from "firebase/auth";
+import { supabase } from "@/integrations/supabase/client";
 
 const Profile = () => {
   const { user, loading } = useAuth();
@@ -51,13 +51,36 @@ const Profile = () => {
   const handleSave = async () => {
     try {
       setSaving(true);
-      const auth = getAuth();
-      if (auth.currentUser && fullName) {
-        await updateProfile(auth.currentUser, { displayName: fullName });
+      
+      // Update profile in Supabase profiles table
+      const updateResult = await api.updateProfileSupabase({ 
+        full_name: fullName || null as any, 
+        phone: phone || null as any 
+      });
+      
+      // Also update user metadata in Supabase Auth (for consistency)
+      const { error: metadataError } = await supabase.auth.updateUser({
+        data: {
+          full_name: fullName || null,
+          phone: phone || null,
+        }
+      });
+      
+      if (metadataError) {
+        console.warn('Failed to update user metadata:', metadataError);
+        // Don't fail the whole operation if metadata update fails
       }
-      await api.updateProfileSupabase({ full_name: fullName || null as any, phone: phone || null as any });
-      toast.success("Profile updated");
+      
+      // Refresh profile data from Supabase
+      const res = await api.getProfile();
+      if (res.success && res.data) {
+        setFullName(res.data.full_name || "");
+        setPhone(res.data.phone || "");
+      }
+      
+      toast.success("Profile updated successfully");
     } catch (e: any) {
+      console.error('Profile update error:', e);
       toast.error(e?.message || "Failed to update profile");
     } finally {
       setSaving(false);

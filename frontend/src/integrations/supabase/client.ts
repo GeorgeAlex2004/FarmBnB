@@ -5,13 +5,69 @@ import type { Database } from './types';
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
+// Validate environment variables
+if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
+  const errorMsg = `Missing Supabase environment variables!
+  Required:
+  - VITE_SUPABASE_URL=${SUPABASE_URL ? '✓' : '✗ MISSING'}
+  - VITE_SUPABASE_PUBLISHABLE_KEY=${SUPABASE_PUBLISHABLE_KEY ? '✓' : '✗ MISSING'}
+  
+  Please check your .env file in the project root.
+  Note: You may need to restart the dev server after changing .env files.`;
+  console.error(errorMsg);
+  throw new Error('Supabase configuration is missing. Check console for details.');
+}
+
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
 
-export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
-  auth: {
-    storage: localStorage,
-    persistSession: true,
-    autoRefreshToken: true,
+// Use global window object to persist singleton across hot reloads
+declare global {
+  interface Window {
+    __SUPABASE_CLIENT__?: ReturnType<typeof createClient<Database>>;
   }
-});
+}
+
+// Create singleton instance to avoid multiple GoTrueClient instances
+// Use window object to persist across hot module reloads
+export const supabase = (() => {
+  // Check if instance exists and if URL has changed (need to recreate)
+  if (typeof window !== 'undefined' && window.__SUPABASE_CLIENT__) {
+    const cachedUrl = (window.__SUPABASE_CLIENT__ as any).supabaseUrl;
+    // If URL changed, clear cache and recreate
+    if (cachedUrl !== SUPABASE_URL) {
+      console.log('Supabase URL changed, recreating client...');
+      delete window.__SUPABASE_CLIENT__;
+      // Clear localStorage to remove old session
+      if (typeof localStorage !== 'undefined') {
+        const keys = Object.keys(localStorage);
+        keys.forEach(key => {
+          if (key.includes('supabase') || key.includes('auth')) {
+            localStorage.removeItem(key);
+          }
+        });
+      }
+    } else {
+      return window.__SUPABASE_CLIENT__;
+    }
+  }
+
+  // Create new instance
+  const instance = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+    auth: {
+      storage: localStorage,
+      persistSession: true,
+      autoRefreshToken: true,
+    },
+  });
+
+  // Store URL for comparison
+  (instance as any).supabaseUrl = SUPABASE_URL;
+
+  // Store in global scope for hot reload persistence
+  if (typeof window !== 'undefined') {
+    window.__SUPABASE_CLIENT__ = instance;
+  }
+
+  return instance;
+})();

@@ -68,9 +68,40 @@ const MyBookings = () => {
     setDetailsDialogOpen(true);
   };
 
+  // Deduplicate bookings: keep only the most recent booking for each unique combination
+  const deduplicatedData = useMemo(() => {
+    if (!Array.isArray(data)) return [];
+    
+    const seen = new Map<string, any>();
+    
+    // Sort by created_at descending to keep the most recent booking
+    const sorted = [...data].sort((a: any, b: any) => {
+      const aDate = new Date(a.created_at || 0).getTime();
+      const bDate = new Date(b.created_at || 0).getTime();
+      return bDate - aDate;
+    });
+    
+    for (const booking of sorted) {
+      const propertyId = booking.property_id || '';
+      const customerId = booking.customer_id || '';
+      const checkIn = booking.check_in_date || (booking as any).checkIn || '';
+      const checkOut = booking.check_out_date || (booking as any).checkOut || '';
+      
+      // Create a unique key for this booking combination
+      const key = `${propertyId}_${customerId}_${checkIn}_${checkOut}`;
+      
+      // Only keep the first (most recent) booking for this combination
+      if (!seen.has(key)) {
+        seen.set(key, booking);
+      }
+    }
+    
+    return Array.from(seen.values());
+  }, [data]);
+
   const { upcoming, past, pendingApproval, pendingPayment, pendingPaymentConfirmation, cancelled } = useMemo(() => {
     const now = new Date();
-    const list = Array.isArray(data) ? data : [];
+    const list = deduplicatedData;
     const withDates = list.map((b: any) => ({
       ...b,
       _checkIn: new Date(b.check_in_date || b.checkIn),

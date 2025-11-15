@@ -154,6 +154,41 @@ const AdminBookings = (): JSX.Element => {
   };
 
   const bookings: Booking[] = bookingsResponse?.data || [];
+  
+  // Deduplicate bookings: keep only the most recent booking for each unique combination of
+  // property_id, customer_id, check_in_date, and check_out_date
+  const deduplicatedBookings = useMemo(() => {
+    const seen = new Map<string, Booking>();
+    
+    // Sort by created_at descending to keep the most recent booking
+    const sorted = [...bookings].sort((a: any, b: any) => {
+      const aDate = new Date(a.created_at || 0).getTime();
+      const bDate = new Date(b.created_at || 0).getTime();
+      return bDate - aDate;
+    });
+    
+    for (const booking of sorted) {
+      const bookingId = booking.id || booking._id || '';
+      const propertyId = typeof booking.property === 'object' 
+        ? (booking.property?._id || booking.property?.id || '')
+        : (booking.property_id || booking.property || '');
+      const customerId = typeof booking.customer === 'object'
+        ? (booking.customer?._id || booking.customer?.id || '')
+        : (booking.customer_id || booking.customer || '');
+      const checkIn = booking.check_in_date || booking.checkIn || '';
+      const checkOut = booking.check_out_date || booking.checkOut || '';
+      
+      // Create a unique key for this booking combination
+      const key = `${propertyId}_${customerId}_${checkIn}_${checkOut}`;
+      
+      // Only keep the first (most recent) booking for this combination
+      if (!seen.has(key)) {
+        seen.set(key, booking);
+      }
+    }
+    
+    return Array.from(seen.values());
+  }, [bookings]);
   const [openDetail, setOpenDetail] = useState<string | null>(null);
   const [openPendingDetail, setOpenPendingDetail] = useState<string | null>(null);
   const [idProofDialogOpen, setIdProofDialogOpen] = useState(false);
@@ -179,13 +214,13 @@ const AdminBookings = (): JSX.Element => {
   // Open detail panel when navigated with ?selected=<id>
   useEffect(() => {
     const selected = searchParams.get('selected');
-    if (selected && bookings.some((b: any) => (b.id || b._id) === selected)) {
+    if (selected && deduplicatedBookings.some((b: any) => (b.id || b._id) === selected)) {
       setOpenDetail(selected);
       // remove the param after opening to avoid stale state on navigation
       searchParams.delete('selected');
       setSearchParams(searchParams, { replace: true });
     }
-  }, [searchParams, setSearchParams, bookings]);
+  }, [searchParams, setSearchParams, deduplicatedBookings]);
 
   // Generate invoice (render in modal)
   const openInvoice = (b: any) => {
@@ -441,7 +476,8 @@ const AdminBookings = (): JSX.Element => {
     const q = norm(searchQuery);
     const d = (searchDate || '').trim();
 
-    return bookings.filter((booking) => {
+    // Use deduplicated bookings instead of raw bookings
+    return deduplicatedBookings.filter((booking) => {
       // status
       if (statusFilter !== "all" && getBookingStatus(booking) !== statusFilter) return false;
 
@@ -466,7 +502,7 @@ const AdminBookings = (): JSX.Element => {
 
       return true;
     });
-  }, [bookings, statusFilter, searchQuery, searchDate]);
+  }, [deduplicatedBookings, statusFilter, searchQuery, searchDate]);
 
   // Get title based on selected filter
   const getTitle = (): string => {

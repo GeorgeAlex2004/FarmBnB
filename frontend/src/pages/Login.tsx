@@ -6,7 +6,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { Home, Mail, Lock, User } from "lucide-react";
 import { Link } from "react-router-dom";
-import { getAuth, sendPasswordResetEmail } from "firebase/auth";
+import { supabase } from "@/integrations/supabase/client";
 
 const Login = () => {
   const { login, register } = useAuth();
@@ -39,8 +39,10 @@ const Login = () => {
   const handlePasswordReset = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const auth = getAuth();
-      await sendPasswordResetEmail(auth, resetEmail || email);
+      const { error } = await supabase.auth.resetPasswordForEmail(resetEmail || email, {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+      if (error) throw error;
       toast.success("Password reset email sent");
       setResetOpen(false);
     } catch (err: any) {

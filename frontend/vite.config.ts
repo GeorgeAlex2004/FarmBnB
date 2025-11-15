@@ -5,8 +5,8 @@ import { componentTagger } from "lovable-tagger";
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
-  // Read env from project root so we can keep a single .env
-  envDir: path.resolve(__dirname, ".."),
+  // Read env from frontend directory (or project root if .env is there)
+  envDir: path.resolve(__dirname),
   base: process.env.VITE_BASE_PATH || "/",
   server: {
     host: "::",

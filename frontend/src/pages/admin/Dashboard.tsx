@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { useMemo } from "react";
 import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Building, Calendar, DollarSign, Users } from "lucide-react";
@@ -19,19 +20,52 @@ const AdminDashboard = () => {
   const properties = propertiesResponse?.data || [];
   const bookings = bookingsResponse?.data || [];
 
+  // Deduplicate bookings: keep only the most recent booking for each unique combination
+  const deduplicatedBookings = useMemo(() => {
+    const seen = new Map<string, any>();
+    
+    // Sort by created_at descending to keep the most recent booking
+    const sorted = [...bookings].sort((a: any, b: any) => {
+      const aDate = new Date(a.created_at || a.createdAt || 0).getTime();
+      const bDate = new Date(b.created_at || b.createdAt || 0).getTime();
+      return bDate - aDate;
+    });
+    
+    for (const booking of sorted) {
+      const propertyId = typeof booking.property === 'object' 
+        ? (booking.property?._id || booking.property?.id || '')
+        : (booking.property_id || booking.property || '');
+      const customerId = typeof booking.customer === 'object'
+        ? (booking.customer?._id || booking.customer?.id || '')
+        : (booking.customer_id || booking.customer || '');
+      const checkIn = booking.check_in_date || booking.checkIn || '';
+      const checkOut = booking.check_out_date || booking.checkOut || '';
+      
+      // Create a unique key for this booking combination
+      const key = `${propertyId}_${customerId}_${checkIn}_${checkOut}`;
+      
+      // Only keep the first (most recent) booking for this combination
+      if (!seen.has(key)) {
+        seen.set(key, booking);
+      }
+    }
+    
+    return Array.from(seen.values());
+  }, [bookings]);
+
   const stats = {
     properties: properties.length,
-    bookings: bookings.length,
-    revenue: bookings
+    bookings: deduplicatedBookings.length,
+    revenue: deduplicatedBookings
       .filter((b: any) => b.status === "confirmed" || b.status === "completed")
       .reduce((sum: number, b: any) => sum + (b.total_amount || b.pricing?.totalAmount || 0), 0),
-    pending: bookings.filter((b: any) => b.status === "pending").length,
+    pending: deduplicatedBookings.filter((b: any) => b.status === "pending").length,
   };
 
-  const recentBookings = bookings
+  const recentBookings = deduplicatedBookings
     .sort((a: any, b: any) => 
-      new Date(b.createdAt || b.created_at).getTime() - 
-      new Date(a.createdAt || a.created_at).getTime()
+      new Date(b.created_at || b.createdAt || 0).getTime() - 
+      new Date(a.created_at || a.createdAt || 0).getTime()
     )
     .slice(0, 5);
 
