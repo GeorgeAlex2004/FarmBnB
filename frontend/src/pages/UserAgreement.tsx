@@ -1,22 +1,70 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AlertCircle, CheckCircle2 } from "lucide-react";
+import { api } from "@/lib/api";
+import { toast } from "sonner";
 
 const UserAgreement = () => {
   const { bookingId } = useParams<{ bookingId: string }>();
   const navigate = useNavigate();
   const [agreed, setAgreed] = useState(false);
+  const [hasAgreed, setHasAgreed] = useState(false); // Track if user has agreed to prevent cancellation
+
+  const cancelBookingMutation = useMutation({
+    mutationFn: (id: string) => api.cancelBooking(id, "User rejected terms and conditions"),
+    onSuccess: () => {
+      toast.success("Booking cancelled");
+      navigate("/properties");
+    },
+    onError: (error: any) => {
+      toast.error(error.message || "Failed to cancel booking");
+    },
+  });
 
   const handleProceed = () => {
     if (agreed && bookingId) {
+      setHasAgreed(true); // Mark as agreed to prevent cancellation
       navigate(`/bookings/${bookingId}/token-payment`);
     }
   };
+
+  const handleCancel = () => {
+    if (bookingId && !hasAgreed) {
+      if (confirm("Are you sure you want to reject the terms and conditions? Your booking will be cancelled.")) {
+        cancelBookingMutation.mutate(bookingId);
+      }
+    } else {
+      navigate(-1);
+    }
+  };
+
+  // Handle browser back button or tab close
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (!hasAgreed && bookingId) {
+        e.preventDefault();
+        e.returnValue = "";
+        // Cancel booking when user tries to close tab/window
+        if (bookingId) {
+          api.cancelBooking(bookingId, "User closed agreement page without accepting terms").catch(() => {
+            // Silently fail if cancellation doesn't work (user might have already cancelled)
+          });
+        }
+      }
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [hasAgreed, bookingId]);
 
   return (
     <div className="container mx-auto px-4 py-8 max-w-4xl">
@@ -191,10 +239,11 @@ const UserAgreement = () => {
               </Button>
               <Button
                 variant="outline"
-                onClick={() => navigate(-1)}
+                onClick={handleCancel}
                 size="lg"
+                disabled={cancelBookingMutation.isPending}
               >
-                Cancel
+                {cancelBookingMutation.isPending ? "Cancelling..." : "Cancel"}
               </Button>
             </div>
           </div>
