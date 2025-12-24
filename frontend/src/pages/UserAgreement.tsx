@@ -73,9 +73,8 @@ const UserAgreement = () => {
               </section>
 
               <section>
-                <h3 className="font-semibold text-base mb-2">4. Guest Relations & Verification</h3>
+                <h3 className="font-semibold text-base mb-2">4. ID Verification</h3>
                 <ul className="list-disc list-inside space-y-1 text-muted-foreground">
-                  <li>After token payment confirmation, you will receive a guest relations call from our team.</li>
                   <li>You are required to upload exactly 2 valid ID proofs for record-keeping purposes.</li>
                   <li>ID proofs are collected for administrative records only and do not require verification approval.</li>
                   <li>Failure to provide ID proofs may delay your booking confirmation.</li>
@@ -153,7 +152,6 @@ const UserAgreement = () => {
                 <h3 className="font-semibold text-base mb-2">12. Contact & Support</h3>
                 <ul className="list-disc list-inside space-y-1 text-muted-foreground">
                   <li>For booking-related queries, contact our customer support team.</li>
-                  <li>Guest relations calls will be made after token payment confirmation.</li>
                   <li>All communication regarding bookings will be sent to your registered email and phone number.</li>
                 </ul>
               </section>
