@@ -620,18 +620,27 @@ class ApiClient {
     if (!userId) throw new Error('Not authenticated');
     
     // Check for existing booking with same property, customer, and date range
+    // Only consider bookings where user has agreed (token paid) or confirmed
+    // This excludes cancelled bookings and pending bookings without token payment (agreement rejected)
     const { data: existingBooking } = await supabase
       .from('bookings')
-      .select('id')
+      .select('id, status, token_paid, payment_status')
       .eq('property_id', bookingData.property)
       .eq('customer_id', userId)
       .eq('check_in_date', bookingData.checkIn)
       .eq('check_out_date', bookingData.checkOut)
-      .in('status', ['pending', 'confirmed'])
+      .neq('status', 'cancelled') // Exclude cancelled bookings
       .maybeSingle();
     
+    // Only block if booking is confirmed OR user has paid token (agreed to terms)
     if (existingBooking) {
-      throw new Error('You already have a booking for these dates. Please check your bookings.');
+      const isConfirmed = existingBooking.status === 'confirmed';
+      const hasTokenPaid = Number(existingBooking.token_paid || 0) >= 5000;
+      const hasAgreed = hasTokenPaid || isConfirmed;
+      
+      if (hasAgreed) {
+        throw new Error('You already have a booking for these dates. Please check your bookings.');
+      }
     }
     
     // Get property details
