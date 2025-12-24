@@ -52,17 +52,46 @@ export const supabase = (() => {
     }
   }
 
+  // Helper function to clear invalid auth sessions
+  const clearInvalidSession = () => {
+    if (typeof window === 'undefined' || typeof localStorage === 'undefined') return;
+    try {
+      const keys = Object.keys(localStorage);
+      keys.forEach(key => {
+        if (key.includes('supabase') || key.includes('auth') || key.includes('sb-')) {
+          localStorage.removeItem(key);
+        }
+      });
+      console.log('Cleared invalid auth session from localStorage');
+    } catch (e) {
+      console.warn('Error clearing localStorage:', e);
+    }
+  };
+
   // Create new instance
   const instance = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
     auth: {
       storage: localStorage,
       persistSession: true,
       autoRefreshToken: true,
+      detectSessionInUrl: false,
     },
   });
 
   // Store URL for comparison
   (instance as any).supabaseUrl = SUPABASE_URL;
+
+  // Handle invalid refresh token errors globally
+  if (typeof window !== 'undefined') {
+    // Listen for auth errors and clear invalid sessions
+    instance.auth.onAuthStateChange((event, session) => {
+      // If token refresh fails (no session after TOKEN_REFRESHED event), clear localStorage
+      if (event === 'TOKEN_REFRESHED' && !session) {
+        console.warn('Token refresh failed, clearing invalid session');
+        clearInvalidSession();
+      }
+    });
+  }
 
   // Store in global scope for hot reload persistence
   if (typeof window !== 'undefined') {

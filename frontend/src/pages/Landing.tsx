@@ -61,6 +61,9 @@ const Landing = () => {
               Find Your Perfect<br />
               <span className="text-white/90">Farm Getaway</span>
             </h1>
+            <p className="text-2xl md:text-3xl lg:text-4xl font-semibold mb-4 text-white/95 animate-fade-in delay-100 italic">
+              Live a day the farm way
+            </p>
             <p className="text-xl md:text-2xl opacity-90 max-w-2xl mx-auto animate-fade-in delay-200">
               Experience rustic charm and peaceful countryside living
             </p>
@@ -180,6 +183,9 @@ const Landing = () => {
         <div className="container mx-auto text-center">
           <p className="text-muted-foreground mb-2">
             &copy; {new Date().getFullYear()} FarmBnB. All rights reserved.
+          </p>
+          <p className="text-lg font-semibold text-foreground mb-2 italic">
+            Live a day the farm way
           </p>
           <p className="text-sm text-muted-foreground">
             Experience the best of farm life

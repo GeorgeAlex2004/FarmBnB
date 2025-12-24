@@ -2,9 +2,10 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { format, isValid, parseISO } from "date-fns";
-import { CheckCircle2, XCircle, Loader2 } from "lucide-react";
+import { format, isValid, parseISO, differenceInDays } from "date-fns";
+import { CheckCircle2, XCircle, Loader2, MessageSquare, Copy, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
+import { generateWhatsAppLink, generateCaretakerMessage, copyToClipboard } from "@/lib/whatsapp";
 
 import { api } from "@/lib/api";
 import {
@@ -79,6 +80,13 @@ const AdminBookings = (): JSX.Element => {
     queryFn: () => api.getBookings({}),
   });
 
+  // Get bookings needing caretaker notification (2 days before check-in)
+  const { data: notificationsResponse, refetch: refetchNotifications } = useQuery({
+    queryKey: ["caretaker-notifications"],
+    queryFn: () => api.getBookingsNeedingNotification(),
+    refetchInterval: 60000, // Refetch every minute
+  });
+
   const [searchParams, setSearchParams] = useSearchParams();
 
   const confirmMutation = useMutation({
@@ -111,12 +119,36 @@ const AdminBookings = (): JSX.Element => {
     },
   });
 
+  const completeGuestCallMutation = useMutation({
+    mutationFn: (id: string) => api.completeGuestRelationsCall(id),
+    onSuccess: () => {
+      toast.success("Guest relations call marked as completed");
+      queryClient.invalidateQueries({ queryKey: ["admin-bookings"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-dashboard"] });
+    },
+    onError: (error: unknown) => {
+      const errorMessage = error instanceof Error ? error.message : "Failed to update guest relations call";
+      toast.error(errorMessage);
+    },
+  });
+
   const formatDate = (date: string | Date | undefined): string => {
     if (!date) return "N/A";
     try {
       const dateObj = typeof date === "string" ? parseISO(date) : new Date(date);
       if (!isValid(dateObj)) return "Invalid Date";
       return format(dateObj, "MMM dd, yyyy");
+    } catch {
+      return "Invalid Date";
+    }
+  };
+
+  const formatDateTime = (date: string | Date | undefined): string => {
+    if (!date) return "N/A";
+    try {
+      const dateObj = typeof date === "string" ? parseISO(date) : new Date(date);
+      if (!isValid(dateObj)) return "Invalid Date";
+      return format(dateObj, "MMM dd, yyyy 'at' hh:mm a");
     } catch {
       return "Invalid Date";
     }
@@ -230,8 +262,12 @@ const AdminBookings = (): JSX.Element => {
     const checkIn = formatDateShort(b.check_in_date);
     const checkOut = formatDateShort(b.check_out_date);
     const guests = b.num_guests || 0;
-    const nights = 1; // Same-day policy
+    // Calculate actual number of days
+    const checkInDate = b.check_in_date ? parseISO(b.check_in_date) : null;
+    const checkOutDate = b.check_out_date ? parseISO(b.check_out_date) : null;
+    const nights = checkInDate && checkOutDate ? Math.max(1, differenceInDays(checkOutDate, checkInDate) + 1) : 1;
     const baseAmount = Number(b.base_amount || 0);
+    const basePricePerDay = nights > 0 ? baseAmount / nights : baseAmount;
     const guestCharges = Number(b.guest_charges || 0);
     const extraFees = Number(b.extra_fees || 0);
     const totalAmount = Number(b.total_amount || 0);
@@ -367,7 +403,7 @@ const AdminBookings = (): JSX.Element => {
           </thead>
           <tbody>
             <tr>
-              <td>Base amount (1 day)</td>
+              <td>Base amount (${formatINR(basePricePerDay)} per day × ${nights} ${nights === 1 ? 'day' : 'days'})</td>
               <td class="right">${nights}</td>
               <td class="right">${formatINR(baseAmount)}</td>
             </tr>
@@ -509,12 +545,6 @@ const AdminBookings = (): JSX.Element => {
     switch (statusFilter) {
       case "all":
         return "All Bookings";
-      case "approval_pending":
-        return "Approval Pending Bookings";
-      case "payment_pending":
-        return "Payment Pending Bookings";
-      case "payment_verification_pending":
-        return "Payment Verification Bookings";
       case "confirmed":
         return "Confirmed Bookings";
       case "cancelled":
@@ -595,10 +625,21 @@ const AdminBookings = (): JSX.Element => {
         <div className="border-t pt-4">
           <h4 className="font-semibold mb-3">Cost Breakdown</h4>
           <div className="space-y-2 text-sm">
-            <div className="flex justify-between">
-              <span>Base amount (1 day):</span>
-              <span>{formatINR(Number(b.base_amount || 0))}</span>
-            </div>
+            {(() => {
+              // Calculate number of days
+              const checkInDate = b.check_in_date ? parseISO(b.check_in_date) : null;
+              const checkOutDate = b.check_out_date ? parseISO(b.check_out_date) : null;
+              const nights = checkInDate && checkOutDate ? Math.max(1, differenceInDays(checkOutDate, checkInDate) + 1) : 1;
+              const baseAmount = Number(b.base_amount || 0);
+              const basePricePerDay = nights > 0 ? baseAmount / nights : baseAmount;
+              
+              return (
+                <div className="flex justify-between">
+                  <span>Base amount ({formatINR(basePricePerDay)} per day × {nights} {nights === 1 ? 'day' : 'days'}):</span>
+                  <span>{formatINR(baseAmount)}</span>
+                </div>
+              );
+            })()}
             {Number(b.guest_charges || 0) > 0 && (
               <div className="flex justify-between">
                 <span>Guest charges ({b.num_guests || 0} guests):</span>
@@ -616,8 +657,12 @@ const AdminBookings = (): JSX.Element => {
               <span>{formatINR(Number(b.total_amount || 0))}</span>
             </div>
             <div className="flex justify-between text-sm pt-1">
-              <span>Advance Paid (50%):</span>
+              <span>Total Paid:</span>
               <span className="font-semibold text-primary">{formatINR(Number(b.advance_paid || 0))}</span>
+            </div>
+            <div className="flex justify-between text-sm pt-1">
+              <span>Remaining:</span>
+              <span className="font-semibold">{formatINR(Math.max(0, Number(b.total_amount || 0) - Number(b.advance_paid || 0)))}</span>
             </div>
           </div>
         </div>
@@ -707,6 +752,64 @@ const AdminBookings = (): JSX.Element => {
           </div>
         )}
 
+        {/* Guest Relations Call Section - Only show for confirmed bookings with token paid */}
+        {b.payment_status === 'token_paid' || b.payment_status === 'full_payment_pending' || b.payment_status === 'full_payment_completed' ? (
+          <div className="border-t pt-4">
+            <h4 className="font-semibold mb-3">Guest Relations Call</h4>
+            <div className="space-y-2 text-sm">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="font-medium">Status: </span>
+                  {b.guest_relations_call_status === 'completed' ? (
+                    <span className="text-green-700 font-semibold">✓ Completed</span>
+                  ) : (
+                    <span className="text-orange-700 font-semibold">⚠ Pending</span>
+                  )}
+                </div>
+                {b.guest_relations_call_status === 'pending' && (
+                  <Button
+                    size="sm"
+                    onClick={() => completeGuestCallMutation.mutate(b.id || b._id)}
+                    disabled={completeGuestCallMutation.isPending}
+                    className="bg-blue-600 hover:bg-blue-700"
+                  >
+                    {completeGuestCallMutation.isPending ? 'Marking...' : 'Mark Call as Completed'}
+                  </Button>
+                )}
+              </div>
+              {b.guest_relations_call_completed_at && (
+                <div className="text-xs text-muted-foreground">
+                  Completed on: {formatDateTime(b.guest_relations_call_completed_at)}
+                </div>
+              )}
+            </div>
+          </div>
+        ) : null}
+
+        {/* Payment Status */}
+        <div className="border-t pt-4">
+          <h4 className="font-semibold mb-3">Payment Status</h4>
+          <div className="space-y-2 text-sm">
+            <div className="flex justify-between">
+              <span>Total Paid:</span>
+              <span className="font-semibold">{formatINR(Number(b.advance_paid || 0))}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Payment Status:</span>
+              <span className={`font-semibold ${
+                b.payment_status === 'full_payment_completed' ? 'text-green-700' :
+                b.payment_status === 'token_paid' ? 'text-orange-700' :
+                'text-red-700'
+              }`}>
+                {b.payment_status === 'token_paid' ? 'Token Paid' :
+                 b.payment_status === 'full_payment_pending' ? 'Full Payment Pending' :
+                 b.payment_status === 'full_payment_completed' ? 'Full Payment Completed' :
+                 'Token Pending'}
+              </span>
+            </div>
+          </div>
+        </div>
+
         {/* Action Buttons based on status */}
         <div className="flex gap-2 pt-4 border-t">
           <Button size="sm" variant="outline" onClick={() => openInvoice(b)}>
@@ -753,6 +856,94 @@ const AdminBookings = (): JSX.Element => {
         </p>
       </div>
 
+      {/* Caretaker Notifications Section */}
+      {notificationsResponse?.data && notificationsResponse.data.length > 0 && (
+        <Card className="shadow-soft border-primary/20 bg-primary/5">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <MessageSquare className="h-5 w-5 text-primary" />
+              Caretaker Notifications (2 Days Before Check-in)
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              {notificationsResponse.data.map((booking: any) => {
+                const property = booking.properties || {};
+                const customer = booking.profiles || {};
+                const caretakerPhone = property.caretaker_phone || import.meta.env.VITE_CARETAKER_PHONE || '';
+                
+                const notificationData = {
+                  bookingId: booking.id,
+                  propertyName: property.name || 'Unknown Property',
+                  checkInDate: booking.check_in_date,
+                  checkOutDate: booking.check_out_date,
+                  numGuests: booking.num_guests || 0,
+                  customerName: customer.full_name || 'Guest',
+                  foodPreference: booking.food_preference || 'Not specified',
+                  allergies: booking.allergies,
+                  specialRequests: booking.special_requests,
+                  vegGuests: booking.vegGuests,
+                  nonVegGuests: booking.nonVegGuests,
+                };
+
+                const message = generateCaretakerMessage(notificationData);
+                const whatsappLink = caretakerPhone ? generateWhatsAppLink(caretakerPhone, message) : null;
+
+                return (
+                  <div key={booking.id} className="p-4 border rounded-lg bg-card">
+                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                      <div className="flex-1">
+                        <div className="font-semibold mb-1">{property.name}</div>
+                        <div className="text-sm text-muted-foreground">
+                          <div>Check-in: {formatDate(booking.check_in_date)}</div>
+                          <div>Guests: {booking.num_guests} | Customer: {customer.full_name || 'Guest'}</div>
+                          <div>Food: {booking.food_preference || 'Not specified'}</div>
+                          {caretakerPhone ? (
+                            <div className="text-xs mt-1">Caretaker: {caretakerPhone}</div>
+                          ) : (
+                            <div className="text-xs text-destructive mt-1">
+                              ⚠️ Caretaker phone not set. Add VITE_CARETAKER_PHONE env variable or set in property.
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={async () => {
+                            const success = await copyToClipboard(message);
+                            if (success) {
+                              toast.success("Message copied to clipboard!");
+                            } else {
+                              toast.error("Failed to copy message");
+                            }
+                          }}
+                        >
+                          <Copy className="h-4 w-4 mr-2" />
+                          Copy Message
+                        </Button>
+                        {whatsappLink && (
+                          <Button
+                            size="sm"
+                            onClick={() => window.open(whatsappLink, '_blank')}
+                            className="bg-green-600 hover:bg-green-700"
+                          >
+                            <MessageSquare className="h-4 w-4 mr-2" />
+                            Open WhatsApp
+                            <ExternalLink className="h-3 w-3 ml-2" />
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <Card className="shadow-soft">
         <CardHeader>
           <CardTitle>{getTitle()}</CardTitle>
@@ -762,9 +953,6 @@ const AdminBookings = (): JSX.Element => {
             <Tabs value={statusFilter} onValueChange={setStatusFilter} className="flex-1">
             <TabsList>
               <TabsTrigger value="all">All</TabsTrigger>
-              <TabsTrigger value="approval_pending">Approval Pending</TabsTrigger>
-              <TabsTrigger value="payment_pending">Payment Pending</TabsTrigger>
-              <TabsTrigger value="payment_verification_pending">Payment Verification</TabsTrigger>
               <TabsTrigger value="confirmed">Confirmed</TabsTrigger>
               <TabsTrigger value="cancelled">Cancelled</TabsTrigger>
             </TabsList>
@@ -812,7 +1000,7 @@ const AdminBookings = (): JSX.Element => {
                       <TableHead>Check-out</TableHead>
                       <TableHead>Guests</TableHead>
                       <TableHead>Total</TableHead>
-                      <TableHead>Advance</TableHead>
+                      <TableHead>Amount Paid</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Actions</TableHead>
                     </TableRow>

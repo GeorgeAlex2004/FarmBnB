@@ -17,51 +17,99 @@ export type Database = {
       bookings: {
         Row: {
           advance_paid: number | null
+          allergies: string | null
           base_amount: number
+          cancellation_reason: string | null
           check_in_date: string
           check_out_date: string
           created_at: string | null
           customer_id: string
           extra_fees: number | null
+          food_preference: string | null
+          food_required: boolean | null
           guest_charges: number | null
+          guest_relations_call_completed_at: string | null
+          guest_relations_call_completed_by: string | null
+          guest_relations_call_status: string | null
           id: string
+          id_proofs: string[] | null
+          manual_reference: string | null
           num_guests: number
+          payment_method: string | null
+          payment_screenshot_url: string | null
+          payment_status: string | null
           property_id: string
+          special_requests: string | null
           status: string | null
+          stripe_payment_intent_id: string | null
+          token_paid: number | null
           total_amount: number
           updated_at: string | null
+          verification_status: string | null
         }
         Insert: {
           advance_paid?: number | null
+          allergies?: string | null
           base_amount: number
+          cancellation_reason?: string | null
           check_in_date: string
           check_out_date: string
           created_at?: string | null
           customer_id: string
           extra_fees?: number | null
+          food_preference?: string | null
+          food_required?: boolean | null
           guest_charges?: number | null
+          guest_relations_call_completed_at?: string | null
+          guest_relations_call_completed_by?: string | null
+          guest_relations_call_status?: string | null
           id?: string
+          id_proofs?: string[] | null
+          manual_reference?: string | null
           num_guests: number
+          payment_method?: string | null
+          payment_screenshot_url?: string | null
+          payment_status?: string | null
           property_id: string
+          special_requests?: string | null
           status?: string | null
+          stripe_payment_intent_id?: string | null
+          token_paid?: number | null
           total_amount: number
           updated_at?: string | null
+          verification_status?: string | null
         }
         Update: {
           advance_paid?: number | null
+          allergies?: string | null
           base_amount?: number
+          cancellation_reason?: string | null
           check_in_date?: string
           check_out_date?: string
           created_at?: string | null
           customer_id?: string
           extra_fees?: number | null
+          food_preference?: string | null
+          food_required?: boolean | null
           guest_charges?: number | null
+          guest_relations_call_completed_at?: string | null
+          guest_relations_call_completed_by?: string | null
+          guest_relations_call_status?: string | null
           id?: string
+          id_proofs?: string[] | null
+          manual_reference?: string | null
           num_guests?: number
+          payment_method?: string | null
+          payment_screenshot_url?: string | null
+          payment_status?: string | null
           property_id?: string
+          special_requests?: string | null
           status?: string | null
+          stripe_payment_intent_id?: string | null
+          token_paid?: number | null
           total_amount?: number
           updated_at?: string | null
+          verification_status?: string | null
         }
         Relationships: [
           {

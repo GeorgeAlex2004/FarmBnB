@@ -125,43 +125,93 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        // Quickly check if user is admin for immediate navigation
-        supabase
-          .from('user_roles')
-          .select('role')
-          .eq('user_id', session.user.id)
-          .eq('role', 'admin')
-          .limit(1)
-          .maybeSingle()
-          .then(({ data: rolesData }) => {
-            const isAdminUser = !!rolesData;
-            if (isAdminUser) {
-              // Navigate to admin dashboard immediately
-              navigate('/admin/dashboard');
+    // Get initial session with error handling
+    supabase.auth.getSession()
+      .then(({ data: { session }, error }) => {
+        // If there's an error related to invalid refresh token, clear the session
+        if (error && (error.message?.includes('Refresh Token') || 
+                      error.message?.includes('Invalid refresh token') ||
+                      error.message?.includes('refresh_token_not_found'))) {
+          console.warn('Invalid refresh token detected in initial session check, clearing session');
+          // Clear auth-related localStorage items
+          try {
+            const keys = Object.keys(localStorage);
+            keys.forEach(key => {
+              if (key.includes('supabase') || key.includes('auth') || key.includes('sb-')) {
+                localStorage.removeItem(key);
+              }
+            });
+          } catch (e) {
+            console.warn('Error clearing localStorage:', e);
+          }
+          setUser(null);
+          setLoading(false);
+          return;
+        }
+
+        if (session?.user) {
+          // Quickly check if user is admin for immediate navigation
+          supabase
+            .from('user_roles')
+            .select('role')
+            .eq('user_id', session.user.id)
+            .eq('role', 'admin')
+            .limit(1)
+            .maybeSingle()
+            .then(({ data: rolesData }) => {
+              const isAdminUser = !!rolesData;
+              if (isAdminUser) {
+                // Navigate to admin dashboard immediately
+                navigate('/admin/dashboard');
+              }
+            });
+          
+          // Fetch full profile in background
+          fetchUserProfile(session.user).then((userData) => {
+            if (userData) {
+              setUser(userData);
+              // Navigate to admin dashboard if user is admin
+              if (userData.role === 'admin') {
+                navigate('/admin/dashboard');
+              }
             }
           });
-        
-        // Fetch full profile in background
-        fetchUserProfile(session.user).then((userData) => {
-          if (userData) {
-            setUser(userData);
-            // Navigate to admin dashboard if user is admin
-            if (userData.role === 'admin') {
-              navigate('/admin/dashboard');
-            }
-          }
-        });
-      }
-      setLoading(false);
-    });
+        } else {
+          setUser(null);
+        }
+        setLoading(false);
+      })
+      .catch((error) => {
+        console.error('Error getting initial session:', error);
+        // On any error, clear user state and continue
+        setUser(null);
+        setLoading(false);
+      });
 
     // Listen for auth changes
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
+      // Handle invalid refresh token errors
+      if (event === 'TOKEN_REFRESHED' && !session) {
+        // Token refresh failed, clear invalid session
+        console.warn('Token refresh failed, clearing invalid session');
+        setUser(null);
+        // Clear auth-related localStorage items
+        try {
+          const keys = Object.keys(localStorage);
+          keys.forEach(key => {
+            if (key.includes('supabase') || key.includes('auth') || key.includes('sb-')) {
+              localStorage.removeItem(key);
+            }
+          });
+        } catch (e) {
+          console.warn('Error clearing localStorage:', e);
+        }
+        setLoading(false);
+        return;
+      }
+
       if (session?.user) {
         // Fetch profile in background, don't block
         // Use a flag to prevent duplicate fetches during login

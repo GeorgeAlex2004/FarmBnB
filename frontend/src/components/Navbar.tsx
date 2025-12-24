@@ -22,6 +22,9 @@ export const Navbar = () => {
             alt="FarmBnB"
             className="h-12 md:h-14 w-auto object-contain transition-transform group-hover:scale-105"
           />
+          <span className="hidden lg:block text-sm md:text-base font-medium text-muted-foreground italic">
+            Live a day the farm way
+          </span>
         </Link>
 
         <div className="flex items-center gap-4">

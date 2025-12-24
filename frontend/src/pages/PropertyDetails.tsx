@@ -33,8 +33,9 @@ const PropertyDetails = () => {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
   const [numGuests, setNumGuests] = useState(2);
-  const [foodRequired, setFoodRequired] = useState<boolean | null>(null);
-  const [foodPreference, setFoodPreference] = useState<'veg' | 'non-veg' | 'both' | ''>('');
+  const [foodPreference, setFoodPreference] = useState<'all-veg' | 'all-non-veg' | 'both' | ''>('');
+  const [vegGuests, setVegGuests] = useState<number>(0);
+  const [nonVegGuests, setNonVegGuests] = useState<number>(0);
   const [allergies, setAllergies] = useState('');
   const [unavailableDates, setUnavailableDates] = useState<Date[]>([]);
 
@@ -221,14 +222,14 @@ const PropertyDetails = () => {
     const serviceFee = Number(property.pricing?.extraFees?.serviceFee ?? property.service_fee ?? 0);
 
     const baseAmount = basePrice * nights;
-    // Guest charges only apply for guests beyond 2 (base covers first 2 guests)
+    // Guest charges only apply for guests beyond 4 (base covers first 4 guests)
     const numberOfGuests = Number(numGuests);
-    const additionalGuests = Math.max(0, numberOfGuests - 2);
+    const additionalGuests = Math.max(0, numberOfGuests - 4);
     const guestCharges = perHeadPrice * additionalGuests * nights;
-    const foodCharges = foodRequired ? 500 * numberOfGuests * nights : 0;
+    // Food is included in the base price, no separate charge
     const extraFees = cleaningFee + serviceFee;
 
-    return baseAmount + guestCharges + foodCharges + extraFees;
+    return baseAmount + guestCharges + extraFees;
   };
 
   const createBookingMutation = useMutation({
@@ -237,9 +238,9 @@ const PropertyDetails = () => {
     },
     onSuccess: (response) => {
       const bookingId = response.data.id;
-      toast.success("Booking created. Upload ID Proofs to proceed.");
+      toast.success("Booking created. Please review and agree to the terms.");
       setTimeout(() => {
-        navigate(`/bookings/${bookingId}/id-proof`);
+        navigate(`/bookings/${bookingId}/agreement`);
       }, 800);
     },
     onError: (error: any) => {
@@ -314,30 +315,51 @@ const PropertyDetails = () => {
         return;
       }
 
-      // Require food selection
-      if (foodRequired === null) {
-        toast.error('Please specify if you require food.');
+      // Require food preference selection
+      if (!foodPreference) {
+        toast.error('Please select food preference (All Veg / All Non-Veg / Both).');
         setIsBookingInProgress(false);
         return;
       }
-      if (foodRequired && !foodPreference) {
-        toast.error('Please choose veg / non-veg / both.');
-        setIsBookingInProgress(false);
-        return;
+      
+      // If "both" is selected, validate veg and non-veg guest counts
+      if (foodPreference === 'both') {
+        if (vegGuests <= 0 || nonVegGuests <= 0) {
+          toast.error('Please specify number of veg and non-veg guests.');
+          setIsBookingInProgress(false);
+          return;
+        }
+        if (vegGuests + nonVegGuests !== numGuests) {
+          toast.error(`Total veg and non-veg guests (${vegGuests + nonVegGuests}) must match total guests (${numGuests}).`);
+          setIsBookingInProgress(false);
+          return;
+        }
       }
 
       const checkIn = format(dateRange.from, 'yyyy-MM-dd');
       const checkOut = format(dateRange.to, 'yyyy-MM-dd');
+    
+    // Build food preference string for special requests
+    let foodPreferenceStr = '';
+    if (foodPreference === 'all-veg') {
+      foodPreferenceStr = `All Veg (${numGuests} guests)`;
+    } else if (foodPreference === 'all-non-veg') {
+      foodPreferenceStr = `All Non-Veg (${numGuests} guests)`;
+    } else if (foodPreference === 'both') {
+      foodPreferenceStr = `Both: ${vegGuests} Veg, ${nonVegGuests} Non-Veg`;
+    }
     
     createBookingMutation.mutate({
       property: id,
       checkIn,
       checkOut,
       numberOfGuests: numGuests,
-      foodRequired,
-      foodPreference: foodPreference || undefined,
+      foodRequired: true, // Food is always required now
+      foodPreference: foodPreference === 'all-veg' ? 'veg' : foodPreference === 'all-non-veg' ? 'non-veg' : 'both',
+      vegGuests: foodPreference === 'both' ? vegGuests : (foodPreference === 'all-veg' ? numGuests : 0),
+      nonVegGuests: foodPreference === 'both' ? nonVegGuests : (foodPreference === 'all-non-veg' ? numGuests : 0),
       allergies: allergies || undefined,
-      specialRequests: `Outside food not allowed. Food ${foodRequired ? `required (${foodPreference})` : 'not required'}${allergies ? `; allergies: ${allergies}` : ''}`,
+      specialRequests: `Outside food not allowed. Food required: ${foodPreferenceStr}${allergies ? `; allergies: ${allergies}` : ''}`,
     }, {
       onSettled: () => {
         setIsBookingInProgress(false);
@@ -469,6 +491,9 @@ const PropertyDetails = () => {
               <h1 className="text-3xl md:text-4xl font-bold mb-2">
                 {property.name}
               </h1>
+              <p className="text-lg md:text-xl font-semibold text-primary italic mb-3">
+                Live a day the farm way
+              </p>
               <div className="flex items-center gap-2 text-muted-foreground">
                 <MapPin className="h-5 w-5" />
                 <span>
@@ -532,7 +557,7 @@ const PropertyDetails = () => {
                   <p className="text-sm text-muted-foreground">per day</p>
                   {perHeadPrice > 0 && (
                     <p className="text-sm text-muted-foreground mt-1">
-                      Base covers up to 2 guests. Additional guests: {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(perHeadPrice)} per guest per day
+                      Base covers up to 4 guests. Additional guests: {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(perHeadPrice)} per guest per day
                     </p>
                   )}
                 </div>
@@ -629,36 +654,101 @@ const PropertyDetails = () => {
                     </p>
                   </div>
 
-                  {/* Food Selection */}
+                  {/* Food Selection - Always Required */}
                   <div className="pt-2">
-                    <div className="flex items-center justify-between mb-1">
-                      <label className="text-sm font-medium">Food required?</label>
-                      <span className="text-xs text-muted-foreground">+ ₹500 per person</span>
+                    <div className="mb-3">
+                      <label className="text-sm font-medium">Food Preference <span className="text-destructive">*</span></label>
                     </div>
-                    <div className="flex gap-3">
-                      <button type="button" className={`px-3 py-1 rounded border ${foodRequired === true ? 'bg-primary text-primary-foreground' : 'bg-background'}`} onClick={() => setFoodRequired(true)}>Yes</button>
-                      <button type="button" className={`px-3 py-1 rounded border ${foodRequired === false ? 'bg-primary text-primary-foreground' : 'bg-background'}`} onClick={() => setFoodRequired(false)}>No</button>
-                    </div>
-                  </div>
-
-                  {foodRequired && (
                     <div className="grid grid-cols-1 gap-3">
                       <div>
-                        <label className="text-sm font-medium mb-1 block">Preference</label>
                         <div className="flex gap-2 flex-wrap">
-                          {(['veg','non-veg','both'] as const).map(opt => (
-                            <button key={opt} type="button" className={`px-3 py-1 rounded border capitalize ${foodPreference === opt ? 'bg-primary text-primary-foreground' : 'bg-background'}`} onClick={() => setFoodPreference(opt)}>
-                              {opt}
-                            </button>
-                          ))}
+                          <button 
+                            type="button" 
+                            className={`px-4 py-2 rounded border capitalize ${foodPreference === 'all-veg' ? 'bg-primary text-primary-foreground' : 'bg-background'}`} 
+                            onClick={() => {
+                              setFoodPreference('all-veg');
+                              setVegGuests(0);
+                              setNonVegGuests(0);
+                            }}
+                          >
+                            All Veg
+                          </button>
+                          <button 
+                            type="button" 
+                            className={`px-4 py-2 rounded border capitalize ${foodPreference === 'all-non-veg' ? 'bg-primary text-primary-foreground' : 'bg-background'}`} 
+                            onClick={() => {
+                              setFoodPreference('all-non-veg');
+                              setVegGuests(0);
+                              setNonVegGuests(0);
+                            }}
+                          >
+                            All Non-Veg
+                          </button>
+                          <button 
+                            type="button" 
+                            className={`px-4 py-2 rounded border capitalize ${foodPreference === 'both' ? 'bg-primary text-primary-foreground' : 'bg-background'}`} 
+                            onClick={() => setFoodPreference('both')}
+                          >
+                            Both
+                          </button>
                         </div>
                       </div>
+                      
+                      {foodPreference === 'both' && (
+                        <div className="grid grid-cols-2 gap-3 p-3 bg-muted/50 rounded-lg">
+                          <div>
+                            <label className="text-sm font-medium mb-1 block">Veg Guests <span className="text-destructive">*</span></label>
+                            <Input 
+                              type="number" 
+                              min="1" 
+                              max={numGuests} 
+                              value={vegGuests || ''} 
+                              onChange={(e) => {
+                                const val = parseInt(e.target.value) || 0;
+                                setVegGuests(val);
+                                setNonVegGuests(Math.max(0, numGuests - val));
+                              }} 
+                              className="border-2" 
+                              placeholder="0"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-sm font-medium mb-1 block">Non-Veg Guests <span className="text-destructive">*</span></label>
+                            <Input 
+                              type="number" 
+                              min="1" 
+                              max={numGuests} 
+                              value={nonVegGuests || ''} 
+                              onChange={(e) => {
+                                const val = parseInt(e.target.value) || 0;
+                                setNonVegGuests(val);
+                                setVegGuests(Math.max(0, numGuests - val));
+                              }} 
+                              className="border-2" 
+                              placeholder="0"
+                            />
+                          </div>
+                          <div className="col-span-2 text-xs text-muted-foreground">
+                            Total: {vegGuests + nonVegGuests} / {numGuests} guests
+                            {vegGuests + nonVegGuests !== numGuests && (
+                              <span className="text-destructive ml-2">(Must match total guests)</span>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                      
                       <div>
                         <label className="text-sm font-medium mb-1 block">Allergies (optional)</label>
-                        <Input type="text" placeholder="e.g., peanuts, gluten" value={allergies} onChange={(e) => setAllergies(e.target.value)} className="border-2" />
+                        <Input 
+                          type="text" 
+                          placeholder="e.g., peanuts, gluten" 
+                          value={allergies} 
+                          onChange={(e) => setAllergies(e.target.value)} 
+                          className="border-2" 
+                        />
                       </div>
                     </div>
-                  )}
+                  </div>
                 </div>
 
                 {availabilityCheck && !availabilityCheck.available && (
@@ -679,7 +769,7 @@ const PropertyDetails = () => {
                     </div>
                     {(() => {
                       const numberOfGuests = Number(numGuests);
-                      const additionalGuests = Math.max(0, numberOfGuests - 2);
+                      const additionalGuests = Math.max(0, numberOfGuests - 4);
                       const guestCharges = perHeadPrice * additionalGuests * nights;
                       return guestCharges > 0 && (
                         <div className="flex justify-between text-sm">
@@ -690,14 +780,6 @@ const PropertyDetails = () => {
                         </div>
                       );
                     })()}
-                    {foodRequired && (
-                      <div className="flex justify-between text-sm">
-                        <span>Food charges ({numGuests} guests × {nights} {nights === 1 ? 'day' : 'days'})</span>
-                        <span>
-                          {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(500 * numGuests * nights)}
-                        </span>
-                      </div>
-                    )}
                     {(cleaningFee > 0 || serviceFee > 0) && (
                       <div className="flex justify-between text-sm">
                         <span>Extra fees</span>
@@ -711,10 +793,13 @@ const PropertyDetails = () => {
                       <span>{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(total)}</span>
                     </div>
                     <div className="text-xs text-muted-foreground pt-1">
-                      Advance: {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(Math.round(total * 0.5 * 100) / 100)} (50%)
+                      Token Amount: {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(5000)} (Non-refundable)
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      Full payment required 48 hours before check-in
                     </div>
                     <div className="text-xs text-destructive/80">
-                      Note: Advance amount is non-refundable.
+                      Note: Token amount of ₹5,000 is non-refundable and must be paid immediately.
                     </div>
                   </div>
                 )}

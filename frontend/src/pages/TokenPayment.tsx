@@ -5,12 +5,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
-import { differenceInHours, differenceInDays, parseISO } from "date-fns";
 import api from "@/lib/api";
 
-const PaymentPage = () => {
+const TokenPaymentPage = () => {
   const { bookingId } = useParams();
-  const [amount, setAmount] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(true);
   const [qrError, setQrError] = useState<boolean>(false);
   const [booking, setBooking] = useState<any>(null);
@@ -18,6 +16,8 @@ const PaymentPage = () => {
   const [screenshotPreview, setScreenshotPreview] = useState<string | null>(null);
   const screenshotRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
+
+  const TOKEN_AMOUNT = 5000; // Fixed token amount
 
   useEffect(() => {
     const init = async () => {
@@ -27,34 +27,11 @@ const PaymentPage = () => {
         const bookingRow = bookingRes.data;
         setBooking(bookingRow);
         
-        // Check if token is paid
-        const tokenPaid = Number((bookingRow as any).token_paid || 0);
-        if (tokenPaid < 5000) {
-          toast.error("Token payment must be completed first");
-          navigate(`/bookings/${bookingId}/token-payment`);
-          return;
-        }
-        
-        // Check 48-hour requirement
-        const checkInDate = parseISO(bookingRow.check_in_date);
-        const now = new Date();
-        const hoursUntilCheckIn = differenceInHours(checkInDate, now);
-        
-        if (hoursUntilCheckIn < 48) {
-          toast.error("Full payment must be completed at least 48 hours before check-in");
+        // Check if token already paid
+        if ((bookingRow as any).payment_status === 'token_paid' || (bookingRow as any).token_paid >= TOKEN_AMOUNT) {
+          toast.info("Token payment already completed");
           navigate("/bookings");
           return;
-        }
-        
-        // Calculate remaining amount
-        const totalAmount = Number(bookingRow.total_amount || 0);
-        const alreadyPaid = Number(bookingRow.advance_paid || 0);
-        const remaining = Math.max(0, totalAmount - alreadyPaid);
-        setAmount(remaining);
-        
-        if (remaining <= 0) {
-          toast.info("Full payment already completed");
-          navigate("/bookings");
         }
       } catch (e: any) {
         toast.error(e?.message || "Failed to initialize payment");
@@ -86,12 +63,12 @@ const PaymentPage = () => {
       }
 
       await api.confirmPaymentWithScreenshot(bookingId, paymentScreenshot, {
-        amount,
-        isTokenPayment: false,
+        amount: TOKEN_AMOUNT,
+        isTokenPayment: true,
       });
 
-      toast.success("Full payment submitted successfully! Admin will verify the transaction.");
-      navigate("/bookings");
+      toast.success("Token payment submitted successfully! Your booking is confirmed. Please upload ID proofs.");
+      navigate(`/bookings/${bookingId}/id-proof`);
     } catch (e: any) {
       toast.error(e?.message || "Failed to record payment");
     }
@@ -105,7 +82,7 @@ const PaymentPage = () => {
       <div className="container mx-auto px-4 py-8 max-w-xl">
         <Card className="shadow-soft">
           <CardHeader>
-            <CardTitle>Complete Full Payment</CardTitle>
+            <CardTitle>Pay Token Amount</CardTitle>
             <p className="text-base font-semibold text-primary italic mt-2">
               Live a day the farm way
             </p>
@@ -115,53 +92,27 @@ const PaymentPage = () => {
               <div className="text-center text-muted-foreground py-8">Initializing...</div>
             ) : (
               <div className="space-y-6">
-                {booking && (() => {
-                  // Calculate number of days
-                  const checkInDate = parseISO(booking.check_in_date);
-                  const checkOutDate = parseISO(booking.check_out_date);
-                  const nights = Math.max(1, differenceInDays(checkOutDate, checkInDate) + 1);
-                  const baseAmount = Number(booking.base_amount || 0);
-                  const basePricePerDay = nights > 0 ? baseAmount / nights : baseAmount;
-                  
-                  return (
-                    <div className="space-y-3 p-4 bg-muted rounded-lg">
-                      <h3 className="font-semibold text-lg mb-2">Booking Summary</h3>
-                      <div className="space-y-1 text-sm">
-                        <div className="flex justify-between">
-                          <span>Base amount ({formatINR(basePricePerDay)} per day × {nights} {nights === 1 ? 'day' : 'days'})</span>
-                          <span>{formatINR(baseAmount)}</span>
-                        </div>
-                        {Number(booking.guest_charges || 0) > 0 && (
-                          <div className="flex justify-between">
-                            <span>Guest charges</span>
-                            <span>{formatINR(Number(booking.guest_charges || 0))}</span>
-                          </div>
-                        )}
-                        {Number(booking.extra_fees || 0) > 0 && (
-                          <div className="flex justify-between">
-                            <span>Extra fees</span>
-                            <span>{formatINR(Number(booking.extra_fees || 0))}</span>
-                          </div>
-                        )}
-                        <div className="flex justify-between font-semibold text-base pt-2 border-t">
-                          <span>Total Amount</span>
-                          <span>{formatINR(Number(booking.total_amount || 0))}</span>
-                        </div>
-                        <div className="flex justify-between text-sm pt-1">
-                          <span>Already Paid</span>
-                          <span>{formatINR(Number(booking.advance_paid || 0))}</span>
-                        </div>
-                        <div className="flex justify-between font-semibold text-base pt-2 border-t">
-                          <span>Remaining Amount to Pay</span>
-                          <span className="font-semibold text-primary">{formatINR(amount)}</span>
-                        </div>
-                        <div className="text-xs text-destructive/80 pt-1">
-                          ⚠️ Full payment must be completed at least 48 hours before check-in
-                        </div>
+                {booking && (
+                  <div className="space-y-3 p-4 bg-muted rounded-lg">
+                    <h3 className="font-semibold text-lg mb-2">Booking Summary</h3>
+                    <div className="space-y-1 text-sm">
+                      <div className="flex justify-between">
+                        <span>Total Booking Amount</span>
+                        <span>{formatINR(Number(booking.total_amount || 0))}</span>
+                      </div>
+                      <div className="flex justify-between font-semibold text-base pt-2 border-t">
+                        <span>Token Amount (Non-refundable)</span>
+                        <span className="text-primary">{formatINR(TOKEN_AMOUNT)}</span>
+                      </div>
+                      <div className="text-xs text-muted-foreground pt-1">
+                        Remaining amount: {formatINR(Math.max(0, Number(booking.total_amount || 0) - TOKEN_AMOUNT))}
+                      </div>
+                      <div className="text-xs text-destructive/80 pt-1">
+                        ⚠️ Full payment must be completed at least 48 hours before check-in date
                       </div>
                     </div>
-                  );
-                })()}
+                  </div>
+                )}
 
                 <div className="flex flex-col items-center space-y-4">
                   <div className="w-64 h-64 bg-muted rounded-lg flex items-center justify-center border-2 border-dashed overflow-hidden">
@@ -181,6 +132,9 @@ const PaymentPage = () => {
                   <div className="text-center">
                     <p className="text-sm text-muted-foreground mb-1">UPI ID</p>
                     <p className="text-lg font-semibold">{import.meta.env.VITE_UPI_ID || "george.j.alexander77-1@okaxis"}</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-sm font-semibold text-primary">Amount to Pay: {formatINR(TOKEN_AMOUNT)}</p>
                   </div>
                 </div>
 
@@ -227,7 +181,20 @@ const PaymentPage = () => {
                   )}
                 </div>
 
-                <Button className="w-full" onClick={handleConfirm} disabled={!paymentScreenshot}>Proceed</Button>
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                  <p className="text-sm text-yellow-800">
+                    <strong>Important:</strong> This token amount of ₹5,000 is non-refundable. 
+                    After payment verification, your booking will be confirmed and you will receive a guest relations call.
+                  </p>
+                </div>
+
+                <Button 
+                  className="w-full" 
+                  onClick={handleConfirm} 
+                  disabled={!paymentScreenshot}
+                >
+                  Submit Token Payment
+                </Button>
               </div>
             )}
           </CardContent>
@@ -237,6 +204,5 @@ const PaymentPage = () => {
   );
 };
 
-export default PaymentPage;
-
+export default TokenPaymentPage;
 

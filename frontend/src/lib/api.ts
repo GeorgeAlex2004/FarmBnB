@@ -2,7 +2,7 @@
 // All operations use Supabase directly with RLS policies
 
 import { supabase } from '@/integrations/supabase/client';
-import { format } from 'date-fns';
+import { format, parseISO, differenceInDays, addDays, startOfDay } from 'date-fns';
 
 // Helper to get current user ID (synchronous version for quick checks)
 const getCurrentUserIdSync = (): string | null => {
@@ -612,6 +612,8 @@ class ApiClient {
     specialRequests?: string;
     foodRequired?: boolean;
     foodPreference?: 'veg' | 'non-veg' | 'both';
+    vegGuests?: number;
+    nonVegGuests?: number;
     allergies?: string;
   }) {
     const userId = await getCurrentUserId();
@@ -654,12 +656,12 @@ class ApiClient {
     const serviceFee = Number(property.service_fee || 0);
     
     const baseAmount = basePrice * nights;
-    // Guest charges only apply for guests beyond 2 (base covers first 2 guests)
-    const additionalGuests = Math.max(0, bookingData.numberOfGuests - 2);
+    // Guest charges only apply for guests beyond 4 (base covers first 4 guests)
+    const additionalGuests = Math.max(0, bookingData.numberOfGuests - 4);
     const guestCharges = perHeadPrice * additionalGuests * nights;
-    const foodCharges = bookingData.foodRequired ? 500 * bookingData.numberOfGuests * nights : 0;
+    // Food is included in the base price, no separate charge
     const extraFees = cleaningFee + serviceFee;
-    const totalAmount = baseAmount + guestCharges + foodCharges + extraFees;
+    const totalAmount = baseAmount + guestCharges + extraFees;
     
     const { data, error } = await supabase
       .from('bookings')
@@ -674,9 +676,10 @@ class ApiClient {
         extra_fees: extraFees,
         total_amount: totalAmount,
         status: 'pending',
-        verification_status: 'pending' as any,
+        payment_status: 'token_pending',
+        verification_status: 'approved' as any, // No ID verification required
         special_requests: bookingData.specialRequests,
-        food_required: bookingData.foodRequired || false,
+        food_required: true, // Food is always required now
         food_preference: bookingData.foodPreference || null,
         allergies: bookingData.allergies || null,
       })
@@ -708,10 +711,10 @@ class ApiClient {
     
     const admin = await isAdmin();
     
-    // Get booking to check ownership
+    // Get booking to check ownership and calculate refund
     const { data: booking } = await supabase
       .from('bookings')
-      .select('customer_id')
+      .select('customer_id, check_in_date, advance_paid, total_amount, token_paid')
       .eq('id', id)
       .single();
     
@@ -721,15 +724,54 @@ class ApiClient {
       throw new Error('Unauthorized');
     }
     
+    // Calculate refund amount based on cancellation policy
+    let refundAmount = 0;
+    const tokenAmount = Number(booking.token_paid || 5000); // Token is always ₹5,000, non-refundable
+    const totalPaid = Number(booking.advance_paid || 0);
+    const remainingAmount = totalPaid - tokenAmount; // Amount paid beyond token
+    
+    if (remainingAmount > 0 && booking.check_in_date) {
+      const checkInDate = parseISO(booking.check_in_date);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      checkInDate.setHours(0, 0, 0, 0);
+      
+      const daysUntilCheckIn = differenceInDays(checkInDate, today);
+      
+      if (daysUntilCheckIn >= 1) {
+        // More than 1 day before: full refund of remaining amount (excluding token)
+        refundAmount = remainingAmount;
+      } else if (daysUntilCheckIn === 0) {
+        // Exactly 1 day before (or same day): 50% refund of remaining amount (excluding token)
+        refundAmount = Math.round(remainingAmount * 0.5 * 100) / 100;
+      }
+      // If daysUntilCheckIn < 0 (past check-in date), refundAmount remains 0
+    }
+    
+    // Store refund information in cancellation reason
+    const refundInfo = `Refund Amount: ₹${refundAmount.toFixed(2)} (Token ₹${tokenAmount.toFixed(2)} non-refundable)`;
+    const fullReason = reason 
+      ? `${reason}\n\n${refundInfo}` 
+      : refundInfo;
+    
     const { data, error } = await supabase
       .from('bookings')
-      .update({ status: 'cancelled', cancellation_reason: reason })
+      .update({ 
+        status: 'cancelled', 
+        cancellation_reason: fullReason 
+      })
       .eq('id', id)
       .select()
       .single();
     
     if (error) throw error;
-    return { success: true, data };
+    return { 
+      success: true, 
+      data,
+      refundAmount: refundAmount,
+      tokenAmount: tokenAmount,
+      totalRefundable: refundAmount + tokenAmount // Token is shown but not refunded
+    };
   }
 
   async completeBooking(id: string) {
@@ -739,6 +781,28 @@ class ApiClient {
     const { data, error } = await supabase
       .from('bookings')
       .update({ status: 'completed' })
+      .eq('id', id)
+      .select()
+      .single();
+    
+    if (error) throw error;
+    return { success: true, data };
+  }
+
+  async completeGuestRelationsCall(id: string) {
+    const admin = await isAdmin();
+    if (!admin) throw new Error('Admin access required');
+    
+    const userId = await getCurrentUserId();
+    if (!userId) throw new Error('Not authenticated');
+    
+    const { data, error } = await supabase
+      .from('bookings')
+      .update({ 
+        guest_relations_call_status: 'completed',
+        guest_relations_call_completed_at: new Date().toISOString(),
+        guest_relations_call_completed_by: userId,
+      } as any)
       .eq('id', id)
       .select()
       .single();
@@ -795,12 +859,15 @@ class ApiClient {
       .eq('id', bookingId)
       .single();
     
-    const existingUrls = (existingBooking as any)?.id_proofs || [];
-    const newUrls = [...existingUrls, ...uploads];
+    // Replace existing ID proofs with new ones (exactly 2 required)
+    const newUrls = uploads;
     
     const { error } = await supabase
       .from('bookings')
-      .update({ id_proofs: newUrls } as any)
+      .update({ 
+        id_proofs: newUrls,
+        verification_status: 'approved' // Auto-approve for record-keeping
+      } as any)
       .eq('id', bookingId);
     
     if (error) throw error;
@@ -834,9 +901,19 @@ class ApiClient {
     throw new Error('Use confirmPaymentWithScreenshot instead');
   }
 
-  async confirmPaymentWithScreenshot(bookingId: string, file: File, extra?: { referenceId?: string; amount?: number }) {
+  async confirmPaymentWithScreenshot(bookingId: string, file: File, extra?: { referenceId?: string; amount?: number; isTokenPayment?: boolean }) {
     const userId = await getCurrentUserId();
     if (!userId) throw new Error('Not authenticated');
+    
+    // Get current booking to check payment status
+    const { data: currentBooking, error: fetchError } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('id', bookingId)
+      .eq('customer_id', userId)
+      .single();
+    
+    if (fetchError || !currentBooking) throw new Error('Booking not found');
     
     // Upload screenshot
     const timestamp = Date.now();
@@ -845,14 +922,40 @@ class ApiClient {
     const path = `payment_screenshots/${bookingId}/${timestamp}-${random}.${ext}`;
     const screenshotUrl = await uploadFile(file, path);
     
+    // Determine if this is token payment or full payment
+    const isTokenPayment = extra?.isTokenPayment ?? ((currentBooking as any).payment_status === 'token_pending');
+    const tokenAmount = 5000;
+    
     // Update booking
     const updates: any = {
       payment_screenshot_url: screenshotUrl,
-      advance_paid: extra?.amount || 0,
     };
     
     if (extra?.referenceId) {
       updates.manual_reference = extra.referenceId;
+    }
+    
+    if (isTokenPayment) {
+      // Token payment: set token_paid and update payment_status
+      updates.token_paid = tokenAmount;
+      updates.advance_paid = tokenAmount;
+      updates.payment_status = 'token_paid';
+      updates.status = 'confirmed'; // Auto-confirm after token payment
+      updates.guest_relations_call_status = 'pending'; // Create guest relations call task
+    } else {
+      // Full payment: add to advance_paid and check if complete
+      const currentAdvance = Number(currentBooking.advance_paid || 0);
+      const paymentAmount = extra?.amount || 0;
+      const newAdvance = currentAdvance + paymentAmount;
+      const totalAmount = Number(currentBooking.total_amount || 0);
+      
+      updates.advance_paid = newAdvance;
+      
+      if (newAdvance >= totalAmount) {
+        updates.payment_status = 'full_payment_completed';
+      } else {
+        updates.payment_status = 'full_payment_pending';
+      }
     }
     
     const { data, error } = await supabase
@@ -922,6 +1025,127 @@ class ApiClient {
   async deleteImage(_filename: string) {
     // Implement if needed
     return { success: true, message: 'Image deleted' };
+  }
+
+  /**
+   * Get bookings that need caretaker notification (2 days before check-in)
+   * Returns confirmed bookings where check-in is exactly 2 days away
+   */
+  async getBookingsNeedingNotification() {
+    const admin = await isAdmin();
+    if (!admin) throw new Error('Admin access required');
+
+    const today = startOfDay(new Date());
+    const twoDaysFromNow = addDays(today, 2);
+    const twoDaysFromNowStr = format(twoDaysFromNow, 'yyyy-MM-dd');
+
+    const { data: bookings, error } = await supabase
+      .from('bookings')
+      .select(`
+        id,
+        check_in_date,
+        check_out_date,
+        num_guests,
+        food_preference,
+        allergies,
+        special_requests,
+        status,
+        payment_status,
+        property_id,
+        customer_id
+      `)
+      .eq('check_in_date', twoDaysFromNowStr)
+      .eq('status', 'confirmed')
+      .in('payment_status', ['full_payment_completed', 'full_payment_pending']);
+
+    if (error) throw error;
+
+    // Fetch property and customer details separately
+    const enrichedBookings = await Promise.all((bookings || []).map(async (booking: any) => {
+      const [propertyResult, customerResult] = await Promise.all([
+        supabase.from('properties').select('id, name').eq('id', booking.property_id).single(),
+        supabase.from('profiles').select('full_name, phone').eq('id', booking.customer_id).single()
+      ]);
+
+      // Parse veg/non-veg counts from special_requests if available
+      let vegGuests: number | undefined;
+      let nonVegGuests: number | undefined;
+      
+      if (booking.special_requests && booking.food_preference === 'both') {
+        const bothMatch = booking.special_requests.match(/Both:\s*(\d+)\s*Veg,\s*(\d+)\s*Non-Veg/i);
+        if (bothMatch) {
+          vegGuests = parseInt(bothMatch[1], 10);
+          nonVegGuests = parseInt(bothMatch[2], 10);
+        }
+      } else if (booking.food_preference === 'veg') {
+        vegGuests = booking.num_guests;
+        nonVegGuests = 0;
+      } else if (booking.food_preference === 'non-veg') {
+        vegGuests = 0;
+        nonVegGuests = booking.num_guests;
+      }
+
+      return {
+        ...booking,
+        properties: propertyResult.data || {},
+        profiles: customerResult.data || {},
+        vegGuests,
+        nonVegGuests
+      };
+    }));
+
+    return {
+      success: true,
+      data: enrichedBookings || []
+    };
+  }
+
+  /**
+   * Get all upcoming confirmed bookings (for admin dashboard)
+   */
+  async getUpcomingBookings(daysAhead: number = 7) {
+    const admin = await isAdmin();
+    if (!admin) throw new Error('Admin access required');
+
+    const today = startOfDay(new Date());
+    const futureDate = addDays(today, daysAhead);
+    const todayStr = format(today, 'yyyy-MM-dd');
+    const futureDateStr = format(futureDate, 'yyyy-MM-dd');
+
+    const { data: bookings, error } = await supabase
+      .from('bookings')
+      .select(`
+        id,
+        check_in_date,
+        check_out_date,
+        num_guests,
+        food_preference,
+        allergies,
+        special_requests,
+        status,
+        payment_status,
+        properties:property_id (
+          id,
+          name,
+          caretaker_phone
+        ),
+        profiles:customer_id (
+          full_name,
+          phone
+        )
+      `)
+      .gte('check_in_date', todayStr)
+      .lte('check_in_date', futureDateStr)
+      .eq('status', 'confirmed')
+      .in('payment_status', ['full_payment_completed', 'full_payment_pending'])
+      .order('check_in_date', { ascending: true });
+
+    if (error) throw error;
+
+    return {
+      success: true,
+      data: bookings || []
+    };
   }
 }
 

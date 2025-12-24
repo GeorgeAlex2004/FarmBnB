@@ -76,9 +76,12 @@ const Properties = () => {
       <div className="container mx-auto px-4 py-8">
         {/* Search Header */}
         <div className="mb-8 animate-fade-in">
-          <h1 className="text-3xl md:text-4xl font-bold mb-6 text-foreground">
+          <h1 className="text-3xl md:text-4xl font-bold mb-2 text-foreground">
             Browse Properties
           </h1>
+          <p className="text-xl md:text-2xl font-semibold text-primary italic mb-6">
+            Live a day the farm way
+          </p>
 
           <div className="flex flex-col sm:flex-row gap-4">
             <div className="relative flex-1">

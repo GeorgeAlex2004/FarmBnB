@@ -21,7 +21,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Calendar, MapPin, ChevronDown, ChevronUp } from "lucide-react";
 import { Link } from "react-router-dom";
-import { format, parseISO, isValid } from "date-fns";
+import { format, parseISO, isValid, differenceInDays } from "date-fns";
 
 const formatINR = (n: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(n);
 
@@ -209,8 +209,12 @@ const MyBookings = () => {
       const checkIn = formatDate(row.check_in_date);
       const checkOut = formatDate(row.check_out_date);
       const guests = Number(row.num_guests || row.numberOfGuests || 0);
-      const nights = 1;
+      // Calculate actual number of days
+      const checkInDate = row.check_in_date ? parseISO(row.check_in_date) : null;
+      const checkOutDate = row.check_out_date ? parseISO(row.check_out_date) : null;
+      const nights = checkInDate && checkOutDate ? Math.max(1, differenceInDays(checkOutDate, checkInDate) + 1) : 1;
       const baseAmount = Number(row.base_amount || 0);
+      const basePricePerDay = nights > 0 ? baseAmount / nights : baseAmount;
       const guestCharges = Number(row.guest_charges || 0);
       const extraFees = Number(row.extra_fees || 0);
       const subtotal = baseAmount + guestCharges + extraFees;
@@ -315,8 +319,8 @@ const MyBookings = () => {
           </thead>
           <tbody>
             <tr>
-              <td>Base amount (1 day)</td>
-              <td class="right">1</td>
+              <td>Base amount (${formatINR(basePricePerDay)} per day × ${nights} ${nights === 1 ? 'day' : 'days'})</td>
+              <td class="right">${nights}</td>
               <td class="right">${formatINR(baseAmount)}</td>
             </tr>
             <tr>
@@ -406,7 +410,18 @@ const MyBookings = () => {
                 <div className="text-xs text-muted-foreground">
                   {b._status === 'pending_approval' || b._status === 'pending_payment' 
                     ? `Advance to pay: ${formatINR(calculateAdvance(Number(b.total_amount ?? 0)))}`
-                    : `Advance: ${formatINR(Number(b.advance_paid ?? 0))}`}
+                    : (() => {
+                        const totalAmount = Number(b.total_amount ?? 0);
+                        const advancePaid = Number(b.advance_paid ?? 0);
+                        const paymentStatus = (b as any).payment_status;
+                        const isFullPaymentComplete = paymentStatus === 'full_payment_completed' || advancePaid >= totalAmount;
+                        
+                        if (b._status === 'confirmed' && !isFullPaymentComplete) {
+                          const remaining = totalAmount - advancePaid;
+                          return `Paid: ${formatINR(advancePaid)} | Remaining: ${formatINR(remaining)}`;
+                        }
+                        return `Advance: ${formatINR(advancePaid)}`;
+                      })()}
                 </div>
               ) : (
                 b.advance_paid > 0 && (
@@ -464,6 +479,30 @@ const MyBookings = () => {
                   <Button variant="outline" size="sm" onClick={() => openInvoice(b)}>
                     Invoice
                   </Button>
+                  {/* Show Make Payment button if full payment not completed */}
+                  {b._status === 'confirmed' && (() => {
+                    const paymentStatus = (b as any).payment_status;
+                    const totalAmount = Number(b.total_amount ?? 0);
+                    const advancePaid = Number(b.advance_paid ?? 0);
+                    const tokenPaid = Number((b as any).token_paid ?? 0);
+                    const isFullPaymentComplete = paymentStatus === 'full_payment_completed' || advancePaid >= totalAmount;
+                    
+                    if (!isFullPaymentComplete) {
+                      // Route to token payment if token not paid, otherwise full payment
+                      const paymentRoute = tokenPaid < 5000 
+                        ? `/bookings/${b.id || b._id}/token-payment`
+                        : `/payments/${b.id || b._id}`;
+                      
+                      return (
+                        <Link to={paymentRoute}>
+                          <Button size="sm" className="bg-primary hover:bg-primary/90">
+                            Make Payment
+                          </Button>
+                        </Link>
+                      );
+                    }
+                    return null;
+                  })()}
                   {b._status === 'confirmed' && (
                     <Button
                       variant="destructive"

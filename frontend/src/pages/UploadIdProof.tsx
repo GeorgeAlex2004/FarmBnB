@@ -36,15 +36,15 @@ const UploadIdProof = () => {
 
   const onUpload = async (files: FileList | null) => {
     if (!bookingId) return;
-    if (!files || files.length < 2) {
-      toast.error('Please select at least 2 ID proof files');
+    if (!files || files.length !== 2) {
+      toast.error('Please select exactly 2 ID proof files');
       return;
     }
     setUploading(true);
     try {
       await api.uploadBookingIdProofs(bookingId, Array.from(files));
-      setStatus('pending');
-      toast.success('ID proofs uploaded. Awaiting admin approval.');
+      setStatus('approved');
+      toast.success('ID proofs uploaded successfully.');
       // Reload booking to get updated ID proofs
       await loadBooking();
     } catch (e: any) {
@@ -63,10 +63,10 @@ const UploadIdProof = () => {
             <CardTitle>Upload ID Proofs</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <p className="text-sm text-muted-foreground">Please upload Government ID proofs (Aadhaar preferred) of at least 2 members. Your booking will be reviewed and approved by admin before payment.</p>
+            <p className="text-sm text-muted-foreground">Please upload exactly 2 Government ID proofs (Aadhaar preferred). These are required for record-keeping purposes.</p>
             <input ref={fileRef} type="file" accept="image/*,application/pdf" multiple className="hidden" onChange={(e) => onUpload(e.target.files)} />
             <Button variant="outline" disabled={uploading} onClick={() => fileRef.current?.click()} className="w-full">
-              {uploading ? 'Uploading...' : 'Select ID Proofs (min 2)'}
+              {uploading ? 'Uploading...' : 'Select 2 ID Proofs'}
             </Button>
             
             {/* Display uploaded ID proofs */}
@@ -113,21 +113,13 @@ const UploadIdProof = () => {
               </div>
             )}
             
-            {status === 'pending' && (
-              <div className="p-3 rounded-md bg-amber-50 border border-amber-200 text-sm text-amber-900">
-                Pending approval. We will notify you once approved.
-              </div>
-            )}
-            {status === 'approved' && (
+            {status === 'approved' && idProofs.length >= 2 && (
               <div className="p-3 rounded-md bg-green-50 border border-green-200 text-sm text-green-900">
-                Approved. You can proceed to payment.
+                ✓ ID proofs uploaded successfully. Your booking is complete.
               </div>
             )}
             <div className="flex gap-3">
               <Button className="flex-1" onClick={() => navigate('/bookings')}>Go to My Bookings</Button>
-              {status === 'approved' && bookingId && (
-                <Button className="flex-1" variant="secondary" onClick={() => navigate(`/payments/${bookingId}`)}>Proceed to Payment</Button>
-              )}
             </div>
           </CardContent>
         </Card>

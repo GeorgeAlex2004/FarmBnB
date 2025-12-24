@@ -16,10 +16,13 @@ import PropertyForm from "./pages/admin/PropertyForm";
 import AdminBookings from "./pages/admin/Bookings";
 import CalendarView from "./pages/admin/CalendarView";
 import Analytics from "./pages/admin/Analytics";
+import TestWhatsAppMessage from "./pages/admin/TestWhatsAppMessage";
 import NotFound from "./pages/NotFound";
 import Profile from "./pages/Profile";
 import PaymentPage from "./pages/Payment";
+import TokenPaymentPage from "./pages/TokenPayment";
 import UploadIdProof from "./pages/UploadIdProof";
+import UserAgreement from "./pages/UserAgreement";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -44,6 +47,8 @@ const App = () => (
             <Route path="/bookings" element={<MyBookings />} />
             <Route path="/profile" element={<Profile />} />
             <Route path="/payments/:bookingId" element={<PaymentPage />} />
+            <Route path="/bookings/:bookingId/agreement" element={<UserAgreement />} />
+            <Route path="/bookings/:bookingId/token-payment" element={<TokenPaymentPage />} />
             <Route path="/bookings/:bookingId/id-proof" element={<UploadIdProof />} />
             
             {/* Admin Routes */}
@@ -55,6 +60,7 @@ const App = () => (
               <Route path="bookings" element={<AdminBookings />} />
               <Route path="calendar" element={<CalendarView />} />
               <Route path="analytics" element={<Analytics />} />
+              <Route path="test-whatsapp" element={<TestWhatsAppMessage />} />
             </Route>
 
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
