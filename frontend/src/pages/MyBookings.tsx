@@ -21,7 +21,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Calendar, MapPin, ChevronDown, ChevronUp, Star, MessageSquare } from "lucide-react";
+import { Calendar, MapPin, ChevronDown, ChevronUp, Star } from "lucide-react";
 import { Link } from "react-router-dom";
 import { format, parseISO, isValid, differenceInDays } from "date-fns";
 import { api } from "@/lib/api";
@@ -82,7 +82,7 @@ const MyBookings = () => {
       const response = await api.getReviewByBooking(bookingIdForReview);
       return response.data;
     },
-    enabled: !!bookingIdForReview && reviewDialogOpen,
+    enabled: !!bookingIdForReview,
   });
 
   // Load existing review data when dialog opens
@@ -562,7 +562,7 @@ const MyBookings = () => {
                       className="border-yellow-300 text-yellow-700 hover:bg-yellow-50"
                     >
                       <Star className="h-4 w-4 mr-1" />
-                      {reviewData ? 'Edit Review' : 'Write Review'}
+                      Review
                     </Button>
                   )}
                   {/* Show Make Payment button if full payment not completed */}

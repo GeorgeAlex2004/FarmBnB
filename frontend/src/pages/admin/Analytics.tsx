@@ -153,9 +153,9 @@ const Analytics = () => {
         totalRevenue: 0,
         totalNights: 0,
         cancelledBookings: 0,
-      });
+      }) as { totalBookings: number; confirmedBookings: number; totalRevenue: number; totalNights: number; cancelledBookings: number; property?: never };
     }
-    return propertyAnalytics.find(stat => (stat.property?.id || stat.property?._id) === selectedPropertyId);
+    return propertyAnalytics.find(stat => (stat.property?.id || stat.property?._id) === selectedPropertyId) as typeof propertyAnalytics[0] | undefined;
   }, [propertyAnalytics, selectedPropertyId]);
 
   // Overall statistics
@@ -700,38 +700,81 @@ const Analytics = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {(selectedPropertyId === "all" ? propertyAnalytics : [selectedPropertyStats].filter(Boolean)).length > 0 ? (
-                      (selectedPropertyId === "all" ? propertyAnalytics : [selectedPropertyStats].filter(Boolean)).map((stat, index) => (
-                        <tr key={stat?.property?.id || stat?.property?._id || index} 
-                            className="border-b hover:bg-gradient-to-r hover:from-primary/5 hover:to-accent/5 transition-colors">
-                          <td className="p-3">
-                            <div className="font-semibold text-foreground">{stat?.property?.name || 'Unknown'}</div>
-                            <div className="text-sm text-muted-foreground">
-                              {stat?.property?.city || ''} {stat?.property?.state ? `, ${stat?.property.state}` : ''}
-                            </div>
+                    {selectedPropertyId === "all" ? (
+                      propertyAnalytics.length > 0 ? (
+                        propertyAnalytics.map((stat, index) => (
+                          <tr key={stat?.property?.id || stat?.property?._id || index} 
+                              className="border-b hover:bg-gradient-to-r hover:from-primary/5 hover:to-accent/5 transition-colors">
+                            <td className="p-3">
+                              <div className="font-semibold text-foreground">{stat?.property?.name || 'Unknown'}</div>
+                              <div className="text-sm text-muted-foreground">
+                                {stat?.property?.city || ''} {stat?.property?.state ? `, ${stat?.property.state}` : ''}
+                              </div>
+                            </td>
+                            <td className="text-center p-3">
+                              <Badge 
+                                className={
+                                  stat?.property?.is_active !== false
+                                    ? 'bg-green-100 text-green-800 border-green-300'
+                                    : 'bg-gray-100 text-gray-800 border-gray-300'
+                                }
+                              >
+                                {stat?.property?.is_active !== false ? 'Active' : 'Inactive'}
+                              </Badge>
+                            </td>
+                            <td className="text-right p-3 font-medium">{stat?.totalBookings || 0}</td>
+                            <td className="text-right p-3">
+                              <span className="font-semibold text-green-700">{stat?.confirmedBookings || 0}</span>
+                            </td>
+                            <td className="text-right p-3">
+                              <span className="font-bold text-primary">{formatCurrency(stat?.totalRevenue || 0)}</span>
+                            </td>
+                            <td className="text-right p-3 text-muted-foreground">{formatCurrency(stat?.averageBookingValue || 0)}</td>
+                            <td className="text-right p-3 font-medium">{stat?.totalNights || 0}</td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={7} className="text-center p-8 text-muted-foreground">
+                            No property data available
                           </td>
-                          <td className="text-center p-3">
-                            <Badge 
-                              className={
-                                stat?.property?.is_active !== false
-                                  ? 'bg-green-100 text-green-800 border-green-300'
-                                  : 'bg-gray-100 text-gray-800 border-gray-300'
-                              }
-                            >
-                              {stat?.property?.is_active !== false ? 'Active' : 'Inactive'}
-                            </Badge>
-                          </td>
-                          <td className="text-right p-3 font-medium">{stat?.totalBookings || 0}</td>
-                          <td className="text-right p-3">
-                            <span className="font-semibold text-green-700">{stat?.confirmedBookings || 0}</span>
-                          </td>
-                          <td className="text-right p-3">
-                            <span className="font-bold text-primary">{formatCurrency(stat?.totalRevenue || 0)}</span>
-                          </td>
-                          <td className="text-right p-3 text-muted-foreground">{formatCurrency(stat?.averageBookingValue || 0)}</td>
-                          <td className="text-right p-3 font-medium">{stat?.totalNights || 0}</td>
                         </tr>
-                      ))
+                      )
+                    ) : selectedPropertyStats && selectedPropertyId !== "all" ? (
+                      <tr className="border-b hover:bg-gradient-to-r hover:from-primary/5 hover:to-accent/5 transition-colors">
+                        <td className="p-3">
+                          <div className="font-semibold text-foreground">{(selectedPropertyStats as any)?.property?.name || 'Unknown'}</div>
+                          <div className="text-sm text-muted-foreground">
+                            {(selectedPropertyStats as any)?.property?.city || ''} {(selectedPropertyStats as any)?.property?.state ? `, ${(selectedPropertyStats as any).property.state}` : ''}
+                          </div>
+                        </td>
+                        <td className="text-center p-3">
+                          <Badge 
+                            className={
+                              (selectedPropertyStats as any)?.property?.is_active !== false
+                                ? 'bg-green-100 text-green-800 border-green-300'
+                                : 'bg-gray-100 text-gray-800 border-gray-300'
+                            }
+                          >
+                            {(selectedPropertyStats as any)?.property?.is_active !== false ? 'Active' : 'Inactive'}
+                          </Badge>
+                        </td>
+                        <td className="text-right p-3 font-medium">{selectedPropertyStats.totalBookings || 0}</td>
+                        <td className="text-right p-3">
+                          <span className="font-semibold text-green-700">{selectedPropertyStats.confirmedBookings || 0}</span>
+                        </td>
+                        <td className="text-right p-3">
+                          <span className="font-bold text-primary">{formatCurrency(selectedPropertyStats.totalRevenue || 0)}</span>
+                        </td>
+                        <td className="text-right p-3 text-muted-foreground">
+                          {formatCurrency(
+                            selectedPropertyStats.confirmedBookings > 0
+                              ? (selectedPropertyStats.totalRevenue || 0) / selectedPropertyStats.confirmedBookings
+                              : 0
+                          )}
+                        </td>
+                        <td className="text-right p-3 font-medium">{selectedPropertyStats.totalNights || 0}</td>
+                      </tr>
                     ) : (
                       <tr>
                         <td colSpan={7} className="text-center p-8 text-muted-foreground">
