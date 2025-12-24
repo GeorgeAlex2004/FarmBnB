@@ -1,13 +1,18 @@
 import { useQuery } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Building, TrendingUp, DollarSign, Calendar } from "lucide-react";
+import { Building, TrendingUp, DollarSign, Calendar, Users, Star, BarChart3, Sparkles } from "lucide-react";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, LineChart, Line } from "recharts";
-import { format, subDays, startOfDay } from "date-fns";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, LineChart, Line, PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
+import { format, subDays, startOfDay, differenceInDays, parseISO } from "date-fns";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 const Analytics = () => {
+  const [selectedPropertyId, setSelectedPropertyId] = useState<string>("all");
+
   const { data: propertiesResponse } = useQuery({
     queryKey: ["admin-properties"],
     queryFn: () => api.getProperties({ status: "all" }),
@@ -49,6 +54,17 @@ const Analytics = () => {
     return Array.from(seen.values());
   }, [bookings]);
 
+  // Filter bookings by selected property
+  const filteredBookings = useMemo(() => {
+    if (selectedPropertyId === "all") return deduplicatedBookings;
+    return deduplicatedBookings.filter((booking: any) => {
+      const propertyId = typeof booking.property === 'object' 
+        ? (booking.property?._id || booking.property?.id || '')
+        : (booking.property_id || booking.property || '');
+      return propertyId === selectedPropertyId;
+    });
+  }, [deduplicatedBookings, selectedPropertyId]);
+
   // Calculate property analytics
   const propertyAnalytics = useMemo(() => {
     const analytics = new Map<string, {
@@ -59,6 +75,7 @@ const Analytics = () => {
       averageBookingValue: number;
       occupancyRate: number;
       totalNights: number;
+      cancelledBookings: number;
     }>();
 
     // Initialize all properties
@@ -72,6 +89,7 @@ const Analytics = () => {
         averageBookingValue: 0,
         occupancyRate: 0,
         totalNights: 0,
+        cancelledBookings: 0,
       });
     });
 
@@ -89,7 +107,9 @@ const Analytics = () => {
       
       stats.totalBookings++;
       
-      if (status === 'confirmed' || status === 'completed') {
+      if (status === 'cancelled') {
+        stats.cancelledBookings++;
+      } else if (status === 'confirmed' || status === 'completed') {
         stats.confirmedBookings++;
         stats.totalRevenue += amount;
       }
@@ -98,9 +118,9 @@ const Analytics = () => {
       const checkIn = booking.check_in_date || booking.checkIn;
       const checkOut = booking.check_out_date || booking.checkOut;
       if (checkIn && checkOut) {
-        const checkInDate = new Date(checkIn);
-        const checkOutDate = new Date(checkOut);
-        const nights = Math.ceil((checkOutDate.getTime() - checkInDate.getTime()) / (1000 * 60 * 60 * 24));
+        const checkInDate = parseISO(checkIn);
+        const checkOutDate = parseISO(checkOut);
+        const nights = Math.max(1, differenceInDays(checkOutDate, checkInDate) + 1);
         if (nights > 0) {
           stats.totalNights += nights;
         }
@@ -112,19 +132,31 @@ const Analytics = () => {
       if (stats.confirmedBookings > 0) {
         stats.averageBookingValue = stats.totalRevenue / stats.confirmedBookings;
       }
-      
-      // Simple occupancy rate: (total nights booked / days in last 90 days) * 100
-      // For simplicity, we'll use a rough estimate based on bookings
-      const daysInPeriod = 90;
-      const maxPossibleNights = daysInPeriod * (stats.property?.max_guests || 1);
-      if (maxPossibleNights > 0) {
-        stats.occupancyRate = Math.min(100, (stats.totalNights / maxPossibleNights) * 100);
-      }
     });
 
     return Array.from(analytics.values())
       .sort((a, b) => b.totalRevenue - a.totalRevenue);
   }, [properties, deduplicatedBookings]);
+
+  // Get selected property analytics
+  const selectedPropertyStats = useMemo(() => {
+    if (selectedPropertyId === "all") {
+      return propertyAnalytics.reduce((acc, stat) => ({
+        totalBookings: acc.totalBookings + stat.totalBookings,
+        confirmedBookings: acc.confirmedBookings + stat.confirmedBookings,
+        totalRevenue: acc.totalRevenue + stat.totalRevenue,
+        totalNights: acc.totalNights + stat.totalNights,
+        cancelledBookings: acc.cancelledBookings + stat.cancelledBookings,
+      }), {
+        totalBookings: 0,
+        confirmedBookings: 0,
+        totalRevenue: 0,
+        totalNights: 0,
+        cancelledBookings: 0,
+      });
+    }
+    return propertyAnalytics.find(stat => (stat.property?.id || stat.property?._id) === selectedPropertyId);
+  }, [propertyAnalytics, selectedPropertyId]);
 
   // Overall statistics
   const overallStats = useMemo(() => {
@@ -158,17 +190,46 @@ const Analytics = () => {
     }).format(amount);
   };
 
-  // Prepare chart data
+  // Prepare chart data for selected property or all
   const revenueByPropertyData = useMemo(() => {
-    return propertyAnalytics
-      .filter(stat => stat.totalRevenue > 0)
-      .map(stat => ({
-        name: stat.property?.name || 'Unknown',
-        revenue: stat.totalRevenue,
-        bookings: stat.confirmedBookings,
-      }))
-      .slice(0, 10); // Top 10 properties
-  }, [propertyAnalytics]);
+    if (selectedPropertyId === "all") {
+      return propertyAnalytics
+        .filter(stat => stat.totalRevenue > 0)
+        .map(stat => ({
+          name: stat.property?.name || 'Unknown',
+          revenue: stat.totalRevenue,
+          bookings: stat.confirmedBookings,
+        }))
+        .slice(0, 10);
+    } else {
+      // For single property, show monthly breakdown
+      const last12Months = Array.from({ length: 12 }, (_, i) => {
+        const date = new Date();
+        date.setMonth(date.getMonth() - (11 - i));
+        return {
+          name: format(date, 'MMM yyyy'),
+          revenue: 0,
+          bookings: 0,
+        };
+      });
+
+      filteredBookings
+        .filter((b: any) => ['confirmed', 'completed'].includes((b.status || '').toLowerCase()))
+        .forEach((booking: any) => {
+          const bookingDate = new Date(booking.created_at || booking.createdAt || Date.now());
+          const monthKey = format(bookingDate, 'MMM yyyy');
+          const amount = Number(booking.total_amount || 0);
+          
+          const monthData = last12Months.find(d => d.name === monthKey);
+          if (monthData) {
+            monthData.revenue += amount;
+            monthData.bookings += 1;
+          }
+        });
+
+      return last12Months;
+    }
+  }, [propertyAnalytics, selectedPropertyId, filteredBookings]);
 
   const revenueOverTimeData = useMemo(() => {
     const last30Days = Array.from({ length: 30 }, (_, i) => {
@@ -179,7 +240,7 @@ const Analytics = () => {
       };
     });
 
-    deduplicatedBookings
+    filteredBookings
       .filter((b: any) => ['confirmed', 'completed'].includes((b.status || '').toLowerCase()))
       .forEach((booking: any) => {
         const bookingDate = new Date(booking.created_at || booking.createdAt || Date.now());
@@ -193,7 +254,32 @@ const Analytics = () => {
       });
 
     return last30Days;
-  }, [deduplicatedBookings]);
+  }, [filteredBookings]);
+
+  // Booking status distribution for pie chart
+  const bookingStatusData = useMemo(() => {
+    const statusCounts = {
+      confirmed: 0,
+      pending: 0,
+      cancelled: 0,
+      completed: 0,
+    };
+
+    filteredBookings.forEach((booking: any) => {
+      const status = (booking.status || '').toLowerCase();
+      if (status === 'confirmed') statusCounts.confirmed++;
+      else if (status === 'cancelled') statusCounts.cancelled++;
+      else if (status === 'completed') statusCounts.completed++;
+      else statusCounts.pending++;
+    });
+
+    return [
+      { name: 'Confirmed', value: statusCounts.confirmed, color: '#10b981' },
+      { name: 'Pending', value: statusCounts.pending, color: '#f59e0b' },
+      { name: 'Cancelled', value: statusCounts.cancelled, color: '#ef4444' },
+      { name: 'Completed', value: statusCounts.completed, color: '#3b82f6' },
+    ].filter(item => item.value > 0);
+  }, [filteredBookings]);
 
   const chartConfig = {
     revenue: {
@@ -202,294 +288,466 @@ const Analytics = () => {
     },
   };
 
+  const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
+
+  const selectedProperty = selectedPropertyId !== "all" 
+    ? properties.find((p: any) => (p.id || p._id) === selectedPropertyId)
+    : null;
+
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold mb-2">Property Analytics</h1>
-        <p className="text-muted-foreground">
-          Comprehensive insights into your property performance
-        </p>
+    <div className="space-y-6 animate-fade-in">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold mb-2 bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
+            Property Analytics
+          </h1>
+          <p className="text-muted-foreground">
+            {selectedPropertyId === "all" 
+              ? "Comprehensive insights into all properties" 
+              : `Detailed analytics for ${selectedProperty?.name || 'selected property'}`}
+          </p>
+        </div>
+        <Select value={selectedPropertyId} onValueChange={setSelectedPropertyId}>
+          <SelectTrigger className="w-[250px] bg-card border-2">
+            <SelectValue placeholder="Select a property" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Properties</SelectItem>
+            {properties.map((prop: any) => (
+              <SelectItem key={prop.id || prop._id} value={prop.id || prop._id}>
+                {prop.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
-      {/* Overall Stats */}
+      {/* Overall Stats - Colorful Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card>
+        <Card className="border-2 border-blue-200 bg-gradient-to-br from-blue-50 to-blue-100/50 hover:shadow-lg transition-all duration-300">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Properties</CardTitle>
-            <Building className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium text-blue-900">Total Properties</CardTitle>
+            <div className="h-10 w-10 rounded-full bg-blue-500 flex items-center justify-center">
+              <Building className="h-5 w-5 text-white" />
+            </div>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{overallStats.totalProperties}</div>
-            <p className="text-xs text-muted-foreground">
+            <div className="text-3xl font-bold text-blue-900">{overallStats.totalProperties}</div>
+            <p className="text-xs text-blue-700 mt-1">
               {overallStats.activeProperties} active, {overallStats.inactiveProperties} inactive
             </p>
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="border-2 border-green-200 bg-gradient-to-br from-green-50 to-green-100/50 hover:shadow-lg transition-all duration-300">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Revenue</CardTitle>
-            <DollarSign className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium text-green-900">Total Revenue</CardTitle>
+            <div className="h-10 w-10 rounded-full bg-green-500 flex items-center justify-center">
+              <DollarSign className="h-5 w-5 text-white" />
+            </div>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{formatCurrency(overallStats.totalRevenue)}</div>
-            <p className="text-xs text-muted-foreground">
-              Avg: {formatCurrency(overallStats.averageRevenuePerProperty)} per property
+            <div className="text-3xl font-bold text-green-900">
+              {selectedPropertyStats 
+                ? formatCurrency(selectedPropertyStats.totalRevenue)
+                : formatCurrency(overallStats.totalRevenue)}
+            </div>
+            <p className="text-xs text-green-700 mt-1">
+              {selectedPropertyStats 
+                ? `${selectedPropertyStats.confirmedBookings} confirmed bookings`
+                : `Avg: ${formatCurrency(overallStats.averageRevenuePerProperty)} per property`}
             </p>
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="border-2 border-purple-200 bg-gradient-to-br from-purple-50 to-purple-100/50 hover:shadow-lg transition-all duration-300">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Bookings</CardTitle>
-            <Calendar className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium text-purple-900">Total Bookings</CardTitle>
+            <div className="h-10 w-10 rounded-full bg-purple-500 flex items-center justify-center">
+              <Calendar className="h-5 w-5 text-white" />
+            </div>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{overallStats.totalBookings}</div>
-            <p className="text-xs text-muted-foreground">
-              {overallStats.confirmedBookings} confirmed
+            <div className="text-3xl font-bold text-purple-900">
+              {selectedPropertyStats 
+                ? selectedPropertyStats.totalBookings
+                : overallStats.totalBookings}
+            </div>
+            <p className="text-xs text-purple-700 mt-1">
+              {selectedPropertyStats 
+                ? `${selectedPropertyStats.confirmedBookings} confirmed`
+                : `${overallStats.confirmedBookings} confirmed`}
             </p>
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="border-2 border-orange-200 bg-gradient-to-br from-orange-50 to-orange-100/50 hover:shadow-lg transition-all duration-300">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Avg Revenue/Property</CardTitle>
-            <TrendingUp className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium text-orange-900">Avg Booking Value</CardTitle>
+            <div className="h-10 w-10 rounded-full bg-orange-500 flex items-center justify-center">
+              <TrendingUp className="h-5 w-5 text-white" />
+            </div>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{formatCurrency(overallStats.averageRevenuePerProperty)}</div>
-            <p className="text-xs text-muted-foreground">
-              Across all properties
+            <div className="text-3xl font-bold text-orange-900">
+              {selectedPropertyStats && selectedPropertyStats.confirmedBookings > 0
+                ? formatCurrency(selectedPropertyStats.totalRevenue / selectedPropertyStats.confirmedBookings)
+                : selectedPropertyStats
+                ? formatCurrency(0)
+                : formatCurrency(overallStats.averageRevenuePerProperty)}
+            </div>
+            <p className="text-xs text-orange-700 mt-1">
+              {selectedPropertyStats ? "Per confirmed booking" : "Across all properties"}
             </p>
           </CardContent>
         </Card>
       </div>
+
+      {/* Property-Specific Stats (when property selected) */}
+      {selectedPropertyStats && selectedPropertyId !== "all" && (
+        <div className="grid gap-4 md:grid-cols-3">
+          <Card className="border-2 border-cyan-200 bg-gradient-to-br from-cyan-50 to-cyan-100/50">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-cyan-900">Total Nights</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-cyan-900">{selectedPropertyStats.totalNights}</div>
+              <p className="text-xs text-cyan-700 mt-1">Nights booked</p>
+            </CardContent>
+          </Card>
+          <Card className="border-2 border-pink-200 bg-gradient-to-br from-pink-50 to-pink-100/50">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-pink-900">Cancelled</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-pink-900">{selectedPropertyStats.cancelledBookings}</div>
+              <p className="text-xs text-pink-700 mt-1">Cancelled bookings</p>
+            </CardContent>
+          </Card>
+          <Card className="border-2 border-indigo-200 bg-gradient-to-br from-indigo-50 to-indigo-100/50">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-indigo-900">Success Rate</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-indigo-900">
+                {selectedPropertyStats.totalBookings > 0
+                  ? Math.round((selectedPropertyStats.confirmedBookings / selectedPropertyStats.totalBookings) * 100)
+                  : 0}%
+              </div>
+              <p className="text-xs text-indigo-700 mt-1">Confirmation rate</p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* Charts Section */}
-      <div className="grid gap-4 md:grid-cols-2">
-        {/* Revenue by Property */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-lg">Revenue by Property</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {revenueByPropertyData.length > 0 ? (
-              <ChartContainer config={chartConfig} className="h-[250px]">
-                <BarChart data={revenueByPropertyData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis 
-                    dataKey="name" 
-                    angle={-45}
-                    textAnchor="end"
-                    height={60}
-                    fontSize={10}
-                  />
-                  <YAxis 
-                    tickFormatter={(value) => `₹${(value / 1000).toFixed(0)}k`}
-                    fontSize={10}
-                    width={50}
-                  />
-                  <ChartTooltip 
-                    content={<ChartTooltipContent formatter={(value) => formatCurrency(Number(value))} />} 
-                  />
-                  <Bar dataKey="revenue" fill="var(--color-revenue)" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ChartContainer>
-            ) : (
-              <div className="flex items-center justify-center h-[250px] text-muted-foreground text-sm">
-                No revenue data available
-              </div>
-            )}
-          </CardContent>
-        </Card>
+      <Tabs defaultValue="revenue" className="space-y-4">
+        <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="revenue">Revenue</TabsTrigger>
+          <TabsTrigger value="bookings">Bookings</TabsTrigger>
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+        </TabsList>
 
-        {/* Revenue Over Time */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-lg">Revenue Over Time (Last 30 Days)</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {revenueOverTimeData.some(d => d.revenue > 0) ? (
-              <ChartContainer config={chartConfig} className="h-[250px]">
-                <LineChart data={revenueOverTimeData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="date" fontSize={10} />
-                  <YAxis 
-                    tickFormatter={(value) => `₹${(value / 1000).toFixed(0)}k`}
-                    fontSize={10}
-                    width={50}
-                  />
-                  <ChartTooltip 
-                    content={<ChartTooltipContent formatter={(value) => formatCurrency(Number(value))} />} 
-                  />
-                  <Line 
-                    type="monotone" 
-                    dataKey="revenue" 
-                    stroke="var(--color-revenue)" 
-                    strokeWidth={2}
-                    dot={{ r: 3 }}
-                    activeDot={{ r: 5 }}
-                  />
-                </LineChart>
-              </ChartContainer>
-            ) : (
-              <div className="flex items-center justify-center h-[250px] text-muted-foreground text-sm">
-                No revenue data for the last 30 days
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Property Performance Table */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Property Performance</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b">
-                  <th className="text-left p-2 font-medium">Property</th>
-                  <th className="text-right p-2 font-medium">Status</th>
-                  <th className="text-right p-2 font-medium">Total Bookings</th>
-                  <th className="text-right p-2 font-medium">Confirmed</th>
-                  <th className="text-right p-2 font-medium">Total Revenue</th>
-                  <th className="text-right p-2 font-medium">Avg Booking Value</th>
-                  <th className="text-right p-2 font-medium">Total Nights</th>
-                </tr>
-              </thead>
-              <tbody>
-                {propertyAnalytics.length > 0 ? (
-                  propertyAnalytics.map((stat, index) => (
-                    <tr key={stat.property?.id || stat.property?._id || index} className="border-b hover:bg-muted/50">
-                      <td className="p-2">
-                        <div className="font-medium">{stat.property?.name || 'Unknown'}</div>
-                        <div className="text-sm text-muted-foreground">
-                          {stat.property?.city || ''} {stat.property?.state ? `, ${stat.property.state}` : ''}
-                        </div>
-                      </td>
-                      <td className="text-right p-2">
-                        <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                          stat.property?.is_active !== false
-                            ? 'bg-green-100 text-green-800'
-                            : 'bg-gray-100 text-gray-800'
-                        }`}>
-                          {stat.property?.is_active !== false ? 'Active' : 'Inactive'}
-                        </span>
-                      </td>
-                      <td className="text-right p-2">{stat.totalBookings}</td>
-                      <td className="text-right p-2">{stat.confirmedBookings}</td>
-                      <td className="text-right p-2 font-semibold">{formatCurrency(stat.totalRevenue)}</td>
-                      <td className="text-right p-2">{formatCurrency(stat.averageBookingValue)}</td>
-                      <td className="text-right p-2">{stat.totalNights}</td>
-                    </tr>
-                  ))
+        <TabsContent value="revenue" className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2">
+            {/* Revenue Chart */}
+            <Card className="border-2 hover:shadow-xl transition-shadow">
+              <CardHeader className="bg-gradient-to-r from-primary/10 to-accent/10 pb-3">
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <BarChart3 className="h-5 w-5 text-primary" />
+                  {selectedPropertyId === "all" ? "Revenue by Property" : "Monthly Revenue"}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-6">
+                {revenueByPropertyData.length > 0 && revenueByPropertyData.some(d => d.revenue > 0) ? (
+                  <ChartContainer config={chartConfig} className="h-[300px]">
+                    <BarChart data={revenueByPropertyData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                      <XAxis 
+                        dataKey="name" 
+                        angle={selectedPropertyId === "all" ? -45 : 0}
+                        textAnchor={selectedPropertyId === "all" ? "end" : "middle"}
+                        height={selectedPropertyId === "all" ? 80 : 40}
+                        fontSize={11}
+                        tick={{ fill: '#6b7280' }}
+                      />
+                      <YAxis 
+                        tickFormatter={(value) => `₹${(value / 1000).toFixed(0)}k`}
+                        fontSize={11}
+                        width={60}
+                        tick={{ fill: '#6b7280' }}
+                      />
+                      <ChartTooltip 
+                        content={<ChartTooltipContent formatter={(value) => formatCurrency(Number(value))} />} 
+                      />
+                      <Bar 
+                        dataKey="revenue" 
+                        fill="url(#colorRevenue)" 
+                        radius={[8, 8, 0, 0]}
+                        className="hover:opacity-80 transition-opacity"
+                      />
+                      <defs>
+                        <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#3b82f6" stopOpacity={1}/>
+                          <stop offset="100%" stopColor="#1d4ed8" stopOpacity={0.8}/>
+                        </linearGradient>
+                      </defs>
+                    </BarChart>
+                  </ChartContainer>
                 ) : (
-                  <tr>
-                    <td colSpan={7} className="text-center p-8 text-muted-foreground">
-                      No property data available
-                    </td>
-                  </tr>
+                  <div className="flex items-center justify-center h-[300px] text-muted-foreground">
+                    <div className="text-center">
+                      <BarChart3 className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                      <p className="text-sm">No revenue data available</p>
+                    </div>
+                  </div>
                 )}
-              </tbody>
-            </table>
+              </CardContent>
+            </Card>
+
+            {/* Revenue Over Time */}
+            <Card className="border-2 hover:shadow-xl transition-shadow">
+              <CardHeader className="bg-gradient-to-r from-green-500/10 to-emerald-500/10 pb-3">
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <TrendingUp className="h-5 w-5 text-green-600" />
+                  Revenue Over Time (Last 30 Days)
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-6">
+                {revenueOverTimeData.some(d => d.revenue > 0) ? (
+                  <ChartContainer config={chartConfig} className="h-[300px]">
+                    <LineChart data={revenueOverTimeData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                      <XAxis dataKey="date" fontSize={11} tick={{ fill: '#6b7280' }} />
+                      <YAxis 
+                        tickFormatter={(value) => `₹${(value / 1000).toFixed(0)}k`}
+                        fontSize={11}
+                        width={60}
+                        tick={{ fill: '#6b7280' }}
+                      />
+                      <ChartTooltip 
+                        content={<ChartTooltipContent formatter={(value) => formatCurrency(Number(value))} />} 
+                      />
+                      <Line 
+                        type="monotone" 
+                        dataKey="revenue" 
+                        stroke="url(#colorLine)"
+                        strokeWidth={3}
+                        dot={{ r: 4, fill: '#10b981' }}
+                        activeDot={{ r: 6, fill: '#059669' }}
+                      />
+                      <defs>
+                        <linearGradient id="colorLine" x1="0" y1="0" x2="1" y2="0">
+                          <stop offset="0%" stopColor="#10b981" stopOpacity={1}/>
+                          <stop offset="100%" stopColor="#059669" stopOpacity={1}/>
+                        </linearGradient>
+                      </defs>
+                    </LineChart>
+                  </ChartContainer>
+                ) : (
+                  <div className="flex items-center justify-center h-[300px] text-muted-foreground">
+                    <div className="text-center">
+                      <TrendingUp className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                      <p className="text-sm">No revenue data for the last 30 days</p>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </div>
-        </CardContent>
-      </Card>
+        </TabsContent>
 
-      {/* Top Performing Properties */}
-      <div className="grid gap-4 md:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <TrendingUp className="h-5 w-5" />
-              Top Revenue Generators
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {propertyAnalytics
-                .filter(stat => stat.totalRevenue > 0)
-                .slice(0, 5)
-                .map((stat, index) => (
-                  <div key={stat.property?.id || stat.property?._id || index} className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary font-semibold">
-                        {index + 1}
-                      </div>
-                      <div>
-                        <div className="font-medium">{stat.property?.name || 'Unknown'}</div>
-                        <div className="text-sm text-muted-foreground">
-                          {stat.confirmedBookings} confirmed bookings
-                        </div>
-                      </div>
+        <TabsContent value="bookings" className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2">
+            {/* Booking Status Distribution */}
+            <Card className="border-2 hover:shadow-xl transition-shadow">
+              <CardHeader className="bg-gradient-to-r from-purple-500/10 to-pink-500/10 pb-3">
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <Users className="h-5 w-5 text-purple-600" />
+                  Booking Status Distribution
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-6">
+                {bookingStatusData.length > 0 ? (
+                  <div className="space-y-4">
+                    <ChartContainer config={chartConfig} className="h-[250px]">
+                      <PieChart>
+                        <Pie
+                          data={bookingStatusData}
+                          cx="50%"
+                          cy="50%"
+                          labelLine={false}
+                          label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                          outerRadius={80}
+                          fill="#8884d8"
+                          dataKey="value"
+                        >
+                          {bookingStatusData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={entry.color} />
+                          ))}
+                        </Pie>
+                        <ChartTooltip />
+                      </PieChart>
+                    </ChartContainer>
+                    <div className="flex flex-wrap gap-3 justify-center">
+                      {bookingStatusData.map((item, index) => (
+                        <Badge key={index} variant="outline" className="px-3 py-1">
+                          <div className="w-3 h-3 rounded-full mr-2" style={{ backgroundColor: item.color }} />
+                          {item.name}: {item.value}
+                        </Badge>
+                      ))}
                     </div>
-                    <div className="text-right">
-                      <div className="font-semibold">{formatCurrency(stat.totalRevenue)}</div>
-                      <div className="text-sm text-muted-foreground">
-                        {formatCurrency(stat.averageBookingValue)} avg
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-center h-[250px] text-muted-foreground">
+                    <div className="text-center">
+                      <Users className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                      <p className="text-sm">No booking data available</p>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Top Properties */}
+            <Card className="border-2 hover:shadow-xl transition-shadow">
+              <CardHeader className="bg-gradient-to-r from-amber-500/10 to-orange-500/10 pb-3">
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <Star className="h-5 w-5 text-amber-600" />
+                  {selectedPropertyId === "all" ? "Top Revenue Generators" : "Booking Summary"}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-6">
+                {selectedPropertyId === "all" ? (
+                  <div className="space-y-3">
+                    {propertyAnalytics
+                      .filter(stat => stat.totalRevenue > 0)
+                      .slice(0, 5)
+                      .map((stat, index) => (
+                        <div key={stat.property?.id || stat.property?._id || index} 
+                             className="flex items-center justify-between p-3 rounded-lg bg-gradient-to-r from-amber-50 to-orange-50 hover:shadow-md transition-all border border-amber-200">
+                          <div className="flex items-center gap-3">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-amber-400 to-orange-500 text-white font-bold shadow-lg">
+                              {index + 1}
+                            </div>
+                            <div>
+                              <div className="font-semibold text-foreground">{stat.property?.name || 'Unknown'}</div>
+                              <div className="text-xs text-muted-foreground">
+                                {stat.confirmedBookings} confirmed bookings
+                              </div>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="font-bold text-amber-700">{formatCurrency(stat.totalRevenue)}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {formatCurrency(stat.averageBookingValue)} avg
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    {propertyAnalytics.filter(stat => stat.totalRevenue > 0).length === 0 && (
+                      <p className="text-center text-muted-foreground py-8">No revenue data available</p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="p-4 rounded-lg bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200">
+                        <div className="text-sm text-blue-700 font-medium mb-1">Total Bookings</div>
+                        <div className="text-2xl font-bold text-blue-900">{selectedPropertyStats.totalBookings}</div>
+                      </div>
+                      <div className="p-4 rounded-lg bg-gradient-to-br from-green-50 to-green-100 border border-green-200">
+                        <div className="text-sm text-green-700 font-medium mb-1">Confirmed</div>
+                        <div className="text-2xl font-bold text-green-900">{selectedPropertyStats.confirmedBookings}</div>
+                      </div>
+                      <div className="p-4 rounded-lg bg-gradient-to-br from-purple-50 to-purple-100 border border-purple-200">
+                        <div className="text-sm text-purple-700 font-medium mb-1">Total Nights</div>
+                        <div className="text-2xl font-bold text-purple-900">{selectedPropertyStats.totalNights}</div>
+                      </div>
+                      <div className="p-4 rounded-lg bg-gradient-to-br from-red-50 to-red-100 border border-red-200">
+                        <div className="text-sm text-red-700 font-medium mb-1">Cancelled</div>
+                        <div className="text-2xl font-bold text-red-900">{selectedPropertyStats.cancelledBookings}</div>
                       </div>
                     </div>
                   </div>
-                ))}
-              {propertyAnalytics.filter(stat => stat.totalRevenue > 0).length === 0 && (
-                <p className="text-center text-muted-foreground py-4">
-                  No revenue data available
-                </p>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Calendar className="h-5 w-5" />
-              Most Booked Properties
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {propertyAnalytics
-                .filter(stat => stat.totalBookings > 0)
-                .sort((a, b) => b.totalBookings - a.totalBookings)
-                .slice(0, 5)
-                .map((stat, index) => (
-                  <div key={stat.property?.id || stat.property?._id || index} className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary font-semibold">
-                        {index + 1}
-                      </div>
-                      <div>
-                        <div className="font-medium">{stat.property?.name || 'Unknown'}</div>
-                        <div className="text-sm text-muted-foreground">
-                          {stat.totalNights} total nights
-                        </div>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <div className="font-semibold">{stat.totalBookings} bookings</div>
-                      <div className="text-sm text-muted-foreground">
-                        {stat.confirmedBookings} confirmed
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              {propertyAnalytics.filter(stat => stat.totalBookings > 0).length === 0 && (
-                <p className="text-center text-muted-foreground py-4">
-                  No booking data available
-                </p>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+        <TabsContent value="overview" className="space-y-4">
+          {/* Property Performance Table */}
+          <Card className="border-2 hover:shadow-xl transition-shadow">
+            <CardHeader className="bg-gradient-to-r from-indigo-500/10 to-blue-500/10">
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Sparkles className="h-5 w-5 text-indigo-600" />
+                Property Performance
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b-2 border-muted">
+                      <th className="text-left p-3 font-semibold text-foreground">Property</th>
+                      <th className="text-center p-3 font-semibold text-foreground">Status</th>
+                      <th className="text-right p-3 font-semibold text-foreground">Total Bookings</th>
+                      <th className="text-right p-3 font-semibold text-foreground">Confirmed</th>
+                      <th className="text-right p-3 font-semibold text-foreground">Total Revenue</th>
+                      <th className="text-right p-3 font-semibold text-foreground">Avg Booking Value</th>
+                      <th className="text-right p-3 font-semibold text-foreground">Total Nights</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(selectedPropertyId === "all" ? propertyAnalytics : [selectedPropertyStats].filter(Boolean)).length > 0 ? (
+                      (selectedPropertyId === "all" ? propertyAnalytics : [selectedPropertyStats].filter(Boolean)).map((stat, index) => (
+                        <tr key={stat?.property?.id || stat?.property?._id || index} 
+                            className="border-b hover:bg-gradient-to-r hover:from-primary/5 hover:to-accent/5 transition-colors">
+                          <td className="p-3">
+                            <div className="font-semibold text-foreground">{stat?.property?.name || 'Unknown'}</div>
+                            <div className="text-sm text-muted-foreground">
+                              {stat?.property?.city || ''} {stat?.property?.state ? `, ${stat?.property.state}` : ''}
+                            </div>
+                          </td>
+                          <td className="text-center p-3">
+                            <Badge 
+                              className={
+                                stat?.property?.is_active !== false
+                                  ? 'bg-green-100 text-green-800 border-green-300'
+                                  : 'bg-gray-100 text-gray-800 border-gray-300'
+                              }
+                            >
+                              {stat?.property?.is_active !== false ? 'Active' : 'Inactive'}
+                            </Badge>
+                          </td>
+                          <td className="text-right p-3 font-medium">{stat?.totalBookings || 0}</td>
+                          <td className="text-right p-3">
+                            <span className="font-semibold text-green-700">{stat?.confirmedBookings || 0}</span>
+                          </td>
+                          <td className="text-right p-3">
+                            <span className="font-bold text-primary">{formatCurrency(stat?.totalRevenue || 0)}</span>
+                          </td>
+                          <td className="text-right p-3 text-muted-foreground">{formatCurrency(stat?.averageBookingValue || 0)}</td>
+                          <td className="text-right p-3 font-medium">{stat?.totalNights || 0}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={7} className="text-center p-8 text-muted-foreground">
+                          No property data available
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 };
 
 export default Analytics;
-
