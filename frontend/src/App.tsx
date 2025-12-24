@@ -16,7 +16,6 @@ import PropertyForm from "./pages/admin/PropertyForm";
 import AdminBookings from "./pages/admin/Bookings";
 import CalendarView from "./pages/admin/CalendarView";
 import Analytics from "./pages/admin/Analytics";
-import TestWhatsAppMessage from "./pages/admin/TestWhatsAppMessage";
 import NotFound from "./pages/NotFound";
 import Profile from "./pages/Profile";
 import PaymentPage from "./pages/Payment";
@@ -60,7 +59,6 @@ const App = () => (
               <Route path="bookings" element={<AdminBookings />} />
               <Route path="calendar" element={<CalendarView />} />
               <Route path="analytics" element={<Analytics />} />
-              <Route path="test-whatsapp" element={<TestWhatsAppMessage />} />
             </Route>
 
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
