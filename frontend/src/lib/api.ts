@@ -1156,6 +1156,139 @@ class ApiClient {
       data: bookings || []
     };
   }
+
+  /**
+   * Create a review for a completed booking
+   */
+  async createReview(bookingId: string, rating: number, comment?: string) {
+    const userId = await getCurrentUserId();
+    if (!userId) throw new Error('Not authenticated');
+
+    // Verify booking belongs to user and is completed
+    const { data: booking, error: bookingError } = await supabase
+      .from('bookings')
+      .select('id, customer_id, status, property_id')
+      .eq('id', bookingId)
+      .eq('customer_id', userId)
+      .eq('status', 'completed')
+      .single();
+
+    if (bookingError || !booking) {
+      throw new Error('Booking not found or not completed');
+    }
+
+    // Check if review already exists
+    const { data: existingReview } = await supabase
+      .from('reviews')
+      .select('id')
+      .eq('booking_id', bookingId)
+      .single();
+
+    if (existingReview) {
+      throw new Error('Review already exists for this booking');
+    }
+
+    // Create review
+    const { data, error } = await supabase
+      .from('reviews')
+      .insert({
+        booking_id: bookingId,
+        property_id: booking.property_id,
+        customer_id: userId,
+        rating,
+        comment: comment || null,
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    return { success: true, data };
+  }
+
+  /**
+   * Update a review
+   */
+  async updateReview(reviewId: string, rating: number, comment?: string) {
+    const userId = await getCurrentUserId();
+    if (!userId) throw new Error('Not authenticated');
+
+    const { data, error } = await supabase
+      .from('reviews')
+      .update({
+        rating,
+        comment: comment || null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', reviewId)
+      .eq('customer_id', userId)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return { success: true, data };
+  }
+
+  /**
+   * Get review for a specific booking
+   */
+  async getReviewByBooking(bookingId: string) {
+    const userId = await getCurrentUserId();
+    if (!userId) throw new Error('Not authenticated');
+
+    const { data, error } = await supabase
+      .from('reviews')
+      .select(`
+        *,
+        profiles:customer_id (
+          full_name
+        )
+      `)
+      .eq('booking_id', bookingId)
+      .single();
+
+    if (error && error.code !== 'PGRST116') throw error; // PGRST116 = no rows returned
+    return { success: true, data: data || null };
+  }
+
+  /**
+   * Get all reviews for a property
+   */
+  async getPropertyReviews(propertyId: string) {
+    const { data, error } = await supabase
+      .from('reviews')
+      .select(`
+        *,
+        profiles:customer_id (
+          full_name
+        ),
+        bookings:booking_id (
+          check_in_date,
+          check_out_date
+        )
+      `)
+      .eq('property_id', propertyId)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    return { success: true, data: data || [] };
+  }
+
+  /**
+   * Delete a review
+   */
+  async deleteReview(reviewId: string) {
+    const userId = await getCurrentUserId();
+    if (!userId) throw new Error('Not authenticated');
+
+    const { error } = await supabase
+      .from('reviews')
+      .delete()
+      .eq('id', reviewId)
+      .eq('customer_id', userId);
+
+    if (error) throw error;
+    return { success: true };
+  }
 }
 
 export const api = new ApiClient();

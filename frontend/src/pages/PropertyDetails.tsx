@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { MapPin, Users, Calendar as CalendarIcon, ChevronLeft, ChevronRight, Wifi, Car, UtensilsCrossed, Waves, Dog, Snowflake, Flame } from "lucide-react";
+import { MapPin, Users, Calendar as CalendarIcon, ChevronLeft, ChevronRight, Wifi, Car, UtensilsCrossed, Waves, Dog, Snowflake, Flame, Star } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { format } from "date-fns";
@@ -58,6 +58,21 @@ const PropertyDetails = () => {
     ...images.map((u: string) => ({ type: 'image' as const, url: u })),
     ...videos.map((u: string) => ({ type: 'video' as const, url: u })),
   ];
+
+  // Fetch reviews for this property
+  const { data: reviewsResponse } = useQuery({
+    queryKey: ["property-reviews", id],
+    queryFn: async () => {
+      if (!id) return { success: true, data: [] };
+      return api.getPropertyReviews(id);
+    },
+    enabled: !!id,
+  });
+
+  const reviews = reviewsResponse?.data || [];
+  const averageRating = reviews.length > 0
+    ? reviews.reduce((sum: number, r: any) => sum + (r.rating || 0), 0) / reviews.length
+    : 0;
 
   // Fetch unavailable dates (bookings + blackouts) for calendar
   const { data: unavailableDatesData } = useQuery({
@@ -541,6 +556,68 @@ const PropertyDetails = () => {
                     </span>
                   )}
                 </div>
+              </CardContent>
+            </Card>
+
+            {/* Reviews Section */}
+            <Card className="shadow-soft animate-scale-in">
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-xl font-semibold">Reviews</h2>
+                  {reviews.length > 0 && (
+                    <div className="flex items-center gap-2">
+                      <div className="flex items-center">
+                        <Star className="h-5 w-5 fill-yellow-400 text-yellow-400" />
+                        <span className="ml-1 font-semibold">{averageRating.toFixed(1)}</span>
+                      </div>
+                      <span className="text-sm text-muted-foreground">
+                        ({reviews.length} {reviews.length === 1 ? 'review' : 'reviews'})
+                      </span>
+                    </div>
+                  )}
+                </div>
+                {reviews.length === 0 ? (
+                  <p className="text-muted-foreground text-center py-8">
+                    No reviews yet. Be the first to review this property!
+                  </p>
+                ) : (
+                  <div className="space-y-4">
+                    {reviews.map((review: any) => (
+                      <div key={review.id} className="border-b pb-4 last:border-b-0 last:pb-0">
+                        <div className="flex items-start justify-between mb-2">
+                          <div>
+                            <p className="font-semibold">
+                              {review.profiles?.full_name || 'Anonymous'}
+                            </p>
+                            {review.bookings && (
+                              <p className="text-xs text-muted-foreground">
+                                Stayed {format(new Date(review.bookings.check_in_date), 'MMM yyyy')}
+                              </p>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1">
+                            {[1, 2, 3, 4, 5].map((star) => (
+                              <Star
+                                key={star}
+                                className={`h-4 w-4 ${
+                                  star <= review.rating
+                                    ? 'fill-yellow-400 text-yellow-400'
+                                    : 'text-gray-300'
+                                }`}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                        {review.comment && (
+                          <p className="text-sm text-muted-foreground mt-2">{review.comment}</p>
+                        )}
+                        <p className="text-xs text-muted-foreground mt-2">
+                          {format(new Date(review.created_at), 'MMM dd, yyyy')}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>

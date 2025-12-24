@@ -223,6 +223,54 @@ export type Database = {
         }
         Relationships: []
       }
+      reviews: {
+        Row: {
+          id: string
+          booking_id: string
+          property_id: string
+          customer_id: string
+          rating: number
+          comment: string | null
+          created_at: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          id?: string
+          booking_id: string
+          property_id: string
+          customer_id: string
+          rating: number
+          comment?: string | null
+          created_at?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          id?: string
+          booking_id?: string
+          property_id?: string
+          customer_id?: string
+          rating?: number
+          comment?: string | null
+          created_at?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reviews_booking_id_fkey"
+            columns: ["booking_id"]
+            isOneToOne: false
+            referencedRelation: "bookings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reviews_property_id_fkey"
+            columns: ["property_id"]
+            isOneToOne: false
+            referencedRelation: "properties"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never

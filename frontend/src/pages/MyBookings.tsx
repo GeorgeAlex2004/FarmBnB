@@ -1,4 +1,4 @@
-import { useMemo, useState, useRef } from "react";
+import { useMemo, useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Navbar } from "@/components/Navbar";
 import { Card, CardContent } from "@/components/ui/card";
@@ -17,9 +17,11 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Calendar, MapPin, ChevronDown, ChevronUp } from "lucide-react";
+import { Calendar, MapPin, ChevronDown, ChevronUp, Star, MessageSquare } from "lucide-react";
 import { Link } from "react-router-dom";
 import { format, parseISO, isValid, differenceInDays } from "date-fns";
 import { api } from "@/lib/api";
@@ -37,6 +39,10 @@ const MyBookings = () => {
   const [invoiceDialogOpen, setInvoiceDialogOpen] = useState(false);
   const [invoiceHtml, setInvoiceHtml] = useState<string>("");
   const invoiceFrameRef = useRef<HTMLIFrameElement | null>(null);
+  const [reviewDialogOpen, setReviewDialogOpen] = useState(false);
+  const [reviewBooking, setReviewBooking] = useState<any>(null);
+  const [reviewRating, setReviewRating] = useState<number>(5);
+  const [reviewComment, setReviewComment] = useState<string>("");
 
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -64,6 +70,54 @@ const MyBookings = () => {
     },
     onError: (error: any) => {
       toast.error(error.message || "Failed to cancel booking");
+    },
+  });
+
+  // Fetch review for a booking
+  const bookingIdForReview = reviewBooking?.id || reviewBooking?._id;
+  const { data: reviewData } = useQuery({
+    queryKey: ["booking-review", bookingIdForReview],
+    queryFn: async () => {
+      if (!bookingIdForReview) return null;
+      const response = await api.getReviewByBooking(bookingIdForReview);
+      return response.data;
+    },
+    enabled: !!bookingIdForReview && reviewDialogOpen,
+  });
+
+  // Load existing review data when dialog opens
+  useEffect(() => {
+    if (reviewDialogOpen && reviewData) {
+      setReviewRating(reviewData.rating);
+      setReviewComment(reviewData.comment || "");
+    } else if (reviewDialogOpen && !reviewData) {
+      setReviewRating(5);
+      setReviewComment("");
+    }
+  }, [reviewDialogOpen, reviewData]);
+
+  // Create/Update review mutation
+  const reviewMutation = useMutation({
+    mutationFn: async ({ bookingId, rating, comment }: { bookingId: string; rating: number; comment?: string }) => {
+      if (reviewData) {
+        // Update existing review
+        return api.updateReview(reviewData.id, rating, comment);
+      } else {
+        // Create new review
+        return api.createReview(bookingId, rating, comment);
+      }
+    },
+    onSuccess: () => {
+      toast.success(reviewData ? "Review updated successfully" : "Review submitted successfully");
+      setReviewDialogOpen(false);
+      setReviewBooking(null);
+      setReviewRating(5);
+      setReviewComment("");
+      queryClient.invalidateQueries({ queryKey: ["booking-review"] });
+      queryClient.invalidateQueries({ queryKey: ["property-reviews"] });
+    },
+    onError: (error: any) => {
+      toast.error(error.message || "Failed to submit review");
     },
   });
 
@@ -496,6 +550,21 @@ const MyBookings = () => {
                   <Button variant="outline" size="sm" onClick={() => openInvoice(b)}>
                     Invoice
                   </Button>
+                  {/* Show Write Review button for completed bookings */}
+                  {b._status === 'past' && b.status === 'completed' && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setReviewBooking(b);
+                        setReviewDialogOpen(true);
+                      }}
+                      className="border-yellow-300 text-yellow-700 hover:bg-yellow-50"
+                    >
+                      <Star className="h-4 w-4 mr-1" />
+                      {reviewData ? 'Edit Review' : 'Write Review'}
+                    </Button>
+                  )}
                   {/* Show Make Payment button if full payment not completed */}
                   {b._status === 'confirmed' && (() => {
                     const paymentStatus = (b as any).payment_status;
@@ -777,6 +846,102 @@ const MyBookings = () => {
                 Download PDF
               </Button>
               <Button variant="ghost" onClick={() => setInvoiceDialogOpen(false)}>Close</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Review Dialog */}
+        <Dialog open={reviewDialogOpen} onOpenChange={setReviewDialogOpen}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Write a Review</DialogTitle>
+              <DialogDescription>
+                Share your experience about your stay at {reviewBooking?.property?.name || reviewBooking?.property_name || 'this property'}
+              </DialogDescription>
+            </DialogHeader>
+            {reviewBooking && (
+              <div className="space-y-4 py-4">
+                {/* Rating */}
+                <div className="space-y-2">
+                  <Label>Rating *</Label>
+                  <div className="flex gap-2">
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <button
+                        key={star}
+                        type="button"
+                        onClick={() => setReviewRating(star)}
+                        className={`p-2 rounded-full transition-colors ${
+                          star <= reviewRating
+                            ? 'text-yellow-400 bg-yellow-50'
+                            : 'text-gray-300 hover:text-yellow-300'
+                        }`}
+                      >
+                        <Star className="h-6 w-6 fill-current" />
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {reviewRating === 5 && 'Excellent'}
+                    {reviewRating === 4 && 'Very Good'}
+                    {reviewRating === 3 && 'Good'}
+                    {reviewRating === 2 && 'Fair'}
+                    {reviewRating === 1 && 'Poor'}
+                  </p>
+                </div>
+
+                {/* Comment */}
+                <div className="space-y-2">
+                  <Label htmlFor="review-comment">Comment (Optional)</Label>
+                  <Textarea
+                    id="review-comment"
+                    placeholder="Tell others about your experience..."
+                    value={reviewComment}
+                    onChange={(e) => setReviewComment(e.target.value)}
+                    rows={4}
+                    className="resize-none"
+                  />
+                </div>
+
+                {/* Show existing review if updating */}
+                {reviewData && (
+                  <div className="p-3 bg-blue-50 border border-blue-200 rounded text-sm text-blue-900">
+                    <p className="font-medium">Updating your existing review</p>
+                    <p className="text-xs mt-1">You can modify your rating and comment</p>
+                  </div>
+                )}
+              </div>
+            )}
+            <DialogFooter>
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setReviewDialogOpen(false);
+                  setReviewBooking(null);
+                  setReviewRating(5);
+                  setReviewComment("");
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => {
+                  if (!reviewBooking) return;
+                  const bookingId = reviewBooking.id || reviewBooking._id;
+                  reviewMutation.mutate({
+                    bookingId,
+                    rating: reviewRating,
+                    comment: reviewComment.trim() || undefined,
+                  });
+                }}
+                disabled={reviewMutation.isPending}
+                className="bg-primary hover:bg-primary/90"
+              >
+                {reviewMutation.isPending
+                  ? 'Submitting...'
+                  : reviewData
+                  ? 'Update Review'
+                  : 'Submit Review'}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
