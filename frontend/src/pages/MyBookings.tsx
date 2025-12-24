@@ -1,5 +1,5 @@
 import { useMemo, useState, useRef } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Navbar } from "@/components/Navbar";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Calendar, MapPin, ChevronDown, ChevronUp } from "lucide-react";
 import { Link } from "react-router-dom";
 import { format, parseISO, isValid, differenceInDays } from "date-fns";
+import { api } from "@/lib/api";
+import { toast } from "sonner";
 
 const formatINR = (n: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(n);
 
@@ -37,6 +39,7 @@ const MyBookings = () => {
   const invoiceFrameRef = useRef<HTMLIFrameElement | null>(null);
 
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const { data, isLoading } = useQuery({
     queryKey: ["my-bookings"],
     queryFn: async () => {
@@ -50,6 +53,18 @@ const MyBookings = () => {
       if (error) throw error;
       return data || [];
     }
+  });
+
+  const cancelBookingMutation = useMutation({
+    mutationFn: (id: string) => api.cancelBooking(id, "Cancelled by user"),
+    onSuccess: () => {
+      toast.success("Booking cancelled successfully");
+      // Invalidate and refetch bookings
+      queryClient.invalidateQueries({ queryKey: ["my-bookings"] });
+    },
+    onError: (error: any) => {
+      toast.error(error.message || "Failed to cancel booking");
+    },
   });
 
   const formatDate = (date: string | Date | undefined): string => {
@@ -450,11 +465,12 @@ const MyBookings = () => {
                     size="sm"
                     onClick={() => {
                       if (confirm("Are you sure you want to cancel this booking?")) {
-                        supabase.from('bookings').update({ status: 'cancelled' }).eq('id', b.id || b._id).then(() => location.reload());
+                        cancelBookingMutation.mutate(b.id || b._id);
                       }
                     }}
+                    disabled={cancelBookingMutation.isPending}
                   >
-                    Cancel
+                    {cancelBookingMutation.isPending ? "Cancelling..." : "Cancel"}
                   </Button>
                 </>
               )}
@@ -464,11 +480,12 @@ const MyBookings = () => {
                   size="sm"
                   onClick={() => {
                     if (confirm("Are you sure you want to cancel this booking?")) {
-                      supabase.from('bookings').update({ status: 'cancelled' }).eq('id', b.id || b._id).then(() => location.reload());
+                      cancelBookingMutation.mutate(b.id || b._id);
                     }
                   }}
+                  disabled={cancelBookingMutation.isPending}
                 >
-                  Cancel
+                  {cancelBookingMutation.isPending ? "Cancelling..." : "Cancel"}
                 </Button>
               )}
               {(b._status === 'confirmed' || b._status === 'past') && (
@@ -507,9 +524,14 @@ const MyBookings = () => {
                     <Button
                       variant="destructive"
                       size="sm"
-                      onClick={() => supabase.from('bookings').update({ status: 'cancelled' }).eq('id', b.id || b._id).then(() => location.reload())}
+                      onClick={() => {
+                        if (confirm("Are you sure you want to cancel this booking?")) {
+                          cancelBookingMutation.mutate(b.id || b._id);
+                        }
+                      }}
+                      disabled={cancelBookingMutation.isPending}
                     >
-                      Cancel
+                      {cancelBookingMutation.isPending ? "Cancelling..." : "Cancel"}
                     </Button>
                   )}
                 </>
