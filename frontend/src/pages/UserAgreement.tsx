@@ -152,7 +152,7 @@ const UserAgreement = () => {
               <section>
                 <h3 className="font-semibold text-base mb-2">7. Check-in & Check-out</h3>
                 <ul className="list-disc list-inside space-y-1 text-muted-foreground">
-                  <li>Standard check-in time is 2:00 PM and check-out time is 11:00 AM.</li>
+                  <li>Standard check-in time is 8:00 AM and check-out time is 7:00 PM.</li>
                   <li>Early check-in or late check-out may be available upon request and subject to availability.</li>
                   <li>Guests must provide valid identification at check-in.</li>
                   <li>Property access details will be shared after full payment confirmation.</li>
